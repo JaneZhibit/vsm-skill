@@ -284,6 +284,15 @@
     isAnalyzingVoice = true; 
     stopTimer();
 
+    // Воспроизводим аудио-филлер на время ожидания ответа ИИ
+    let fillerAudio: HTMLAudioElement | null = null;
+    if (!trainWorld.isAudioMuted) {
+      const fillerNum = Math.floor(Math.random() * 3) + 1;
+      fillerAudio = new Audio(`/storage/audio/fillers/filler_${fillerNum}.mp3`);
+      fillerAudio.volume = 0.75;
+      fillerAudio.play().catch(() => {});
+    }
+
     try {
       // Отправляем на бэкенд ТЕКСТ (audioBlob = null)
       const res = await trainWorld.resolveVoiceIncident(
@@ -293,6 +302,12 @@
         String(fullDialogueText), 
         currentStep?.expected_rule
       );
+
+      // Глушим филлер, когда получен ответ от сервера
+      if (fillerAudio) {
+        fillerAudio.pause();
+        fillerAudio.currentTime = 0;
+      }
 
       feedbackResult = res?.incident_result || res;
       stage = 'feedback';
@@ -308,6 +323,10 @@
       }
 
     } catch (e) {
+      if (fillerAudio) {
+        fillerAudio.pause();
+        fillerAudio.currentTime = 0;
+      }
       playErrorSound();
     } finally {
       isAnalyzingVoice = false;

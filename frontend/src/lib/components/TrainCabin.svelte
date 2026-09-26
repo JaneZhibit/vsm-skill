@@ -12,7 +12,13 @@
   let isDebriefOpen = $state<boolean>(false);
 
   let selectedSeat = $derived(trainWorld.selectedSeat);
-  let callingSeat = $derived(trainWorld.seats.find((s) => s.activeIncident != null));
+  let callingSeat = $derived(
+    trainWorld.seats.find(
+      (s) =>
+        s.activeIncident != null &&
+        (typeof s.activeIncident === 'string' || s.activeIncident.phase !== 'passive')
+    )
+  );
   const isTripFinished = $derived(
     trainWorld.currentKm >= 678.5 || trainWorld.timeSeconds >= 58500
   );
@@ -311,6 +317,21 @@
             🛎️ Место {callingSeat.id} • Ожидание: {Math.ceil(trainWorld.reactionTimeLeft)} сек ➔
           </button>
         {/if}
+
+        <!-- Пассивные пассажиры в проходе (нетрезвый 🍺, спящий 💤) -->
+        {#each trainWorld.seats.filter(s => s.isOccupied && ((s.activeIncident && typeof s.activeIncident === 'object' && s.activeIncident.phase === 'passive') || s.condition === 'drunk' || s.condition === 'sleeping')) as passiveSeat}
+          {#if !callingSeat || callingSeat.id !== passiveSeat.id}
+            {@const ppos = getSeatCoords(passiveSeat.id)}
+            <button
+              onclick={() => handleCallClick(passiveSeat.id)}
+              class="aisle-call-badge !bg-stone-900/90 !border-amber-500/60 hover:!bg-stone-800 text-amber-200"
+              style="top: {ppos.top}; left: {ppos.left}; transform: translate(-50%, -50%) scale({ppos.scale * 0.85});"
+              title="Подойти к месту {passiveSeat.id}"
+            >
+              <span>{passiveSeat.condition === 'drunk' ? '🍺' : '💤'} Место {passiveSeat.id}</span>
+            </button>
+          {/if}
+        {/each}
       </div>
     {:else}
       <!-- Вид кресла с пассажиром (диалог / осмотр) -->

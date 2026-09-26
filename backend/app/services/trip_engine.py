@@ -34,6 +34,7 @@ class TripEngine:
         self.time_seconds = setup["start_time"]
         self.shift_phase = setup["start_phase"]
         self.speed = 0.0 # Поезд стоит на станции
+        self.game_master.init_triggers(mode=mode, start_time=self.time_seconds)
         
         # 2. Генерируем пассажиров
         self.passenger_manager.generate_initial_manifest(
@@ -58,6 +59,10 @@ class TripEngine:
     def spawn_incident(self, force_incident: Optional[str] = None):
         self.game_master.spawn_incident(self.passenger_manager.seats, force_incident)
         return self.get_manifest()
+
+    def process_tick(self, current_time: float) -> list:
+        self.time_seconds = current_time
+        return self.game_master.process_tick(current_time, self.passenger_manager.seats)
 
     def process_station_arrival(self, station_index: int) -> StationEventResponse:
         return self.passenger_manager.process_station(station_index)

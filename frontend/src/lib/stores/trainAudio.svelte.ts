@@ -16,6 +16,7 @@ export class TrainAudioStore {
   // Текущее состояние для расчета громкости
   private currentView: 'aisle' | 'seat' = 'aisle';
   private isPassengerSpeaking = false;
+  private ambientLoops: Map<string, HTMLAudioElement> = new Map();
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -87,6 +88,13 @@ export class TrainAudioStore {
     this.isAudioMuted = !this.isAudioMuted;
     this.ensureAudioContext();
     this.syncAudioPlayback(true, false);
+    for (const audio of this.ambientLoops.values()) {
+      if (this.isAudioMuted) {
+        audio.pause();
+      } else {
+        audio.play().catch(() => {});
+      }
+    }
   }
 
   public unmuteAudio(): void {
@@ -94,6 +102,9 @@ export class TrainAudioStore {
       this.isAudioMuted = false;
       this.ensureAudioContext();
       this.syncAudioPlayback(true, false);
+      for (const audio of this.ambientLoops.values()) {
+        audio.play().catch(() => {});
+      }
     }
   }
 
@@ -107,6 +118,40 @@ export class TrainAudioStore {
 
   public stopAmbient(smooth = true): void {
     stopAmbient(smooth);
+  }
+
+  /** Воспроизведение зацикленного эмбиента (плач ребенка и т.п.) */
+  public playAmbientLoop(filename: string, volume = 0.4): void {
+    if (this.ambientLoops.has(filename)) {
+      const existing = this.ambientLoops.get(filename)!;
+      if (existing.paused && !this.isAudioMuted) {
+        existing.play().catch(() => {});
+      }
+      return;
+    }
+
+    try {
+      const audio = new Audio(`/storage/audio/${filename}`);
+      audio.loop = true;
+      audio.volume = this.isAudioMuted ? 0 : volume;
+      this.ambientLoops.set(filename, audio);
+
+      if (!this.isAudioMuted) {
+        audio.play().catch((e) => console.warn('Ambient loop autoplay blocked:', e));
+      }
+    } catch (e) {
+      console.warn('Error starting ambient loop:', e);
+    }
+  }
+
+  /** Остановка зацикленного эмбиента */
+  public stopAmbientLoop(filename: string): void {
+    const audio = this.ambientLoops.get(filename);
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+      this.ambientLoops.delete(filename);
+    }
   }
 
   public setAmbientDucking(ducked: boolean): void {

@@ -46,7 +46,7 @@ export interface ScenarioOption {
 export interface ScenarioStep {
   prompt: string | Record<string, string>;
   timer_seconds: number;
-  phase?: 'learning' | 'voice_exam';
+  phase?: 'learning' | 'voice_exam' | 'passive' | 'ambient' | 'urgent' | string;
   action_type?: 'choice' | 'voice' | 'click' | 'hold';
   expected_rule?: string;
   options: ScenarioOption[];
@@ -56,7 +56,7 @@ export interface ActiveIncident {
   incident_id: string;
   title: string;
   start_step: string;
-  phase?: 'learning' | 'voice_exam';
+  phase?: 'learning' | 'voice_exam' | 'passive' | 'ambient' | 'urgent' | string;
   steps: Record<string, ScenarioStep>;
   prompt?: string | Record<string, string>;
   timer_seconds?: number;
@@ -120,6 +120,7 @@ export interface PassengerSeat extends Omit<SeatInfo, 'active_incident'> {
   notes?: string;
   isTverReminded?: boolean;
   isStationExitReminded?: boolean;
+  isSleepingMissedPenaltyApplied?: boolean;
 }
 
 export interface CabinConfig {

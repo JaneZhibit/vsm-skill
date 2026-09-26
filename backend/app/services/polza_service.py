@@ -141,43 +141,21 @@ class PolzaAIService:
 3. Если проводник говорит неадекватный бред — возмущайся в `passenger_reply` и ставь штраф.
 """
 
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "resolve_incident",
-                    "description": "Завершить инцидент",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "is_passed": {"type": "boolean"},
-                            "loyalty_delta": {"type": "integer"},
-                            "safety_delta": {"type": "integer"},
-                            "mood": {"type": "string", "enum": ["calm", "annoyed", "happy"]},
-                            "passenger_reply": {"type": "string", "description": "Прямая речь пассажира (ответ проводнику)"},
-                            "feedback_title": {"type": "string", "description": "Заголовок для инструктора"},
-                            "feedback_text": {"type": "string", "description": "Разбор действий для инструктора"}
-                        },
-                        "required": ["is_passed", "loyalty_delta", "safety_delta", "mood", "passenger_reply", "feedback_title", "feedback_text"]
-                    }
-                }
+        schema = {
+            "type": "object",
+            "properties": {
+                "is_passed": {"type": "boolean", "description": "Справился ли проводник с ситуацией"},
+                "loyalty_delta": {"type": "integer", "description": "Изменение лояльности от -25 до +25"},
+                "safety_delta": {"type": "integer", "description": "Изменение безопасности от -25 до +25"},
+                "mood": {"type": "string", "enum": ["calm", "annoyed", "happy"], "description": "Итоговое настроение пассажира"},
+                "passenger_reply": {"type": "string", "description": "Прямая речь пассажира (ответ проводнику)"},
+                "feedback_title": {"type": "string", "description": "Короткий заголовок разбора для инструктора"},
+                "feedback_text": {"type": "string", "description": "Подробный разбор действий проводника"},
+                "trigger_event": {"type": "string", "enum": ["none", "medic_search"], "description": "Событие бабочки (medic_search или none)"}
             },
-            {
-                "type": "function",
-                "function": {
-                    "name": "trigger_butterfly_effect",
-                    "description": "Запустить новый инцидент (поиск врача)",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "new_incident_id": {"type": "string"},
-                            "passenger_reply": {"type": "string", "description": "Что ты ответишь проводнику (например 'Да, позовите скорее!')"},
-                        },
-                        "required": ["new_incident_id", "passenger_reply"]
-                    }
-                }
-            }
-        ]
+            "required": ["is_passed", "loyalty_delta", "safety_delta", "mood", "passenger_reply", "feedback_title", "feedback_text", "trigger_event"],
+            "additionalProperties": False
+        }
 
         payload = {
             "model": settings.POLZA_CHAT_MODEL,
@@ -185,45 +163,38 @@ class PolzaAIService:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Проводник: «{conductor_text}»"}
             ],
-            "tools": tools,
-            "tool_choice": "required",
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "incident_evaluation",
+                    "strict": True,
+                    "schema": schema
+                }
+            },
             "temperature": 0.3,
-            "reasoning": {"enabled": True, "effort": "low"}  # 🧠 LOW THINKING для скорости
+            "reasoning": {"enabled": True, "effort": "low"}
         }
 
         if not self.api_key or self.api_key == "your_polza_api_key_here":
             return self._offline_evaluate(conductor_text, conductor_gender)
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=20.0) as client:
                 resp = await client.post(f"{self.base_url}/chat/completions", headers=self._headers(), json=payload)
                 if resp.status_code == 200:
                     data = resp.json()
-                    tool_calls = data["choices"][0]["message"].get("tool_calls", [])
-                    if tool_calls:
-                        func = tool_calls[0]["function"]
-                        args = json.loads(func["arguments"])
-                        if func["name"] == "trigger_butterfly_effect":
-                            return {
-                                "butterfly_effect": args.get("new_incident_id", "inc_medic_search"),
-                                "passenger_reply": args.get("passenger_reply", "Да, позовите скорее врача!"),
-                                "feedback_text": "Ожидание помощи",
-                                "mood": "calm",
-                                "loyalty_delta": 0,
-                                "safety_delta": 0,
-                                "is_passed": True,
-                                "feedback_title": "Действие: Поиск помощи",
-                                "role_model_steps_covered": ["Эмпатия", "Правило", "Решение"]
-                            }
-                        else:
-                            if "role_model_steps_covered" not in args:
-                                args["role_model_steps_covered"] = ["Эмпатия", "Правило", "Решение"]
-                            return args
+                    content = data["choices"][0]["message"].get("content", "")
+                    if content:
+                        parsed = json.loads(content)
+                        if parsed.get("trigger_event") == "medic_search":
+                            parsed["butterfly_effect"] = "inc_medic_search"
+                        if "role_model_steps_covered" not in parsed:
+                            parsed["role_model_steps_covered"] = ["Эмпатия", "Правило", "Решение"]
+                        return parsed
                 else:
-                    # ЛОГИРУЕМ ОШИБКУ POLZA AI!
-                    print(f"❌ [POLZA API ERROR] Код {resp.status_code}: {resp.text}")
+                    print(f"[POLZA API ERROR] Code {resp.status_code}: {resp.text}")
         except Exception as e:
-            print(f"❌ [POLZA NETWORK ERROR] Ошибка: {e}")
+            print(f"[POLZA NETWORK ERROR] Error: {e}")
 
         return self._offline_evaluate(conductor_text, conductor_gender)
 

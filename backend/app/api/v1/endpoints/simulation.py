@@ -80,12 +80,16 @@ async def get_trip_state(user: Dict[str, Any] = Depends(get_current_user)):
 
 @router.post("/trip/state")
 async def sync_trip_state(payload: TripStatePayload, user: Dict[str, Any] = Depends(get_current_user)):
-    """Сохраняет состояние (вызывается фронтендом каждые 5 сек)."""
+    """Сохраняет состояние (вызывается фронтендом каждые 5 сек) и обрабатывает тики GameMaster."""
     engine = trip_manager.get_trip(user["id"])
-    engine.time_seconds = payload.time_seconds
     engine.speed = payload.speed
     engine.shift_phase = payload.shift_phase
-    return {"status": "synced"}
+    events = engine.process_tick(payload.time_seconds)
+    return {
+        "status": "synced",
+        "events": events,
+        "manifest": engine.get_manifest() if events else None,
+    }
 
 @router.get("/trip/stations")
 async def get_route_stations():

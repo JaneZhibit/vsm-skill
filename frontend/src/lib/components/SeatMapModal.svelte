@@ -52,7 +52,13 @@
   }
 
   function isRowWithIncident(row: number): boolean {
-    return trainWorld.seats.some((s) => s.row === row && s.isOccupied && s.activeIncident != null);
+    return trainWorld.seats.some(
+      (s) =>
+        s.row === row &&
+        s.isOccupied &&
+        s.activeIncident != null &&
+        (typeof s.activeIncident === 'string' || s.activeIncident.phase !== 'passive')
+    );
   }
 
   const rows = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -127,6 +133,36 @@
           <span class="direction-item font-semibold text-amber-400">Голова состава (Вагон 02) →</span>
         </div>
 
+        {#snippet SeatBeacon(seat: PassengerSeat)}
+          {#if seat.isOccupied}
+            {#if seat.activeIncident != null}
+              {#if typeof seat.activeIncident === 'object' && seat.activeIncident.phase === 'passive'}
+                {#if seat.condition === 'drunk' || seat.activeIncident.incident_id.includes('drunk')}
+                  <span class="beacon-call text-amber-500">🍺</span>
+                {:else if seat.condition === 'sleeping'}
+                  <span class="beacon-call text-indigo-400">💤</span>
+                {:else}
+                  <span class="beacon-call text-amber-400">🍺</span>
+                {/if}
+              {:else}
+                <span class="beacon-call animate-bounce">🔔</span>
+              {/if}
+            {:else if seat.condition === 'annoyed'}
+              <span class="beacon-call">🔔</span>
+            {:else if seat.condition === 'sick'}
+              <span class="beacon-sick">🩺</span>
+            {:else if seat.condition === 'sleeping'}
+              <span class="beacon-pending text-indigo-400">💤</span>
+            {:else if seat.condition === 'drunk'}
+              <span class="beacon-pending text-amber-500">🍺</span>
+            {:else if seat.ticketStatus === 'validated'}
+              <span class="beacon-ok">✓</span>
+            {:else}
+              <span class="beacon-pending">•</span>
+            {/if}
+          {/if}
+        {/snippet}
+
         <!-- Сетка кресел вагона (горизонтальная раскладка) -->
         <div class="cabin-grid-wrapper">
           <div class="cabin-grid">
@@ -142,23 +178,13 @@
                     class:selected={currentSeat?.id === seat.id}
                     class:validated={seat.isOccupied && seat.ticketStatus === 'validated'}
                     class:pending={seat.isOccupied && seat.ticketStatus === 'not_checked'}
-                    class:alert={seat.isOccupied && seat.activeIncident != null}
+                    class:alert={seat.isOccupied && seat.activeIncident != null && (typeof seat.activeIncident === 'string' || seat.activeIncident.phase !== 'passive')}
                     class:row-alert={isRowWithIncident(r)}
                     onclick={() => handleSelect(seat)}
                     title="{seat.id}: {seat.isOccupied ? (seat.passengerName || 'Пассажир') : 'Свободно'}"
                   >
                     <span class="seat-id">{seat.id}</span>
-                    {#if seat.isOccupied}
-                      {#if seat.activeIncident != null || seat.condition === 'annoyed'}
-                        <span class="beacon-call">🔔</span>
-                      {:else if seat.condition === 'sick'}
-                        <span class="beacon-sick">🩺</span>
-                      {:else if seat.ticketStatus === 'validated'}
-                        <span class="beacon-ok">✓</span>
-                      {:else}
-                        <span class="beacon-pending">•</span>
-                      {/if}
-                    {/if}
+                    {@render SeatBeacon(seat)}
                   </button>
                 {/if}
               {/each}
@@ -176,23 +202,13 @@
                     class:selected={currentSeat?.id === seat.id}
                     class:validated={seat.isOccupied && seat.ticketStatus === 'validated'}
                     class:pending={seat.isOccupied && seat.ticketStatus === 'not_checked'}
-                    class:alert={seat.isOccupied && seat.activeIncident != null}
+                    class:alert={seat.isOccupied && seat.activeIncident != null && (typeof seat.activeIncident === 'string' || seat.activeIncident.phase !== 'passive')}
                     class:row-alert={isRowWithIncident(r)}
                     onclick={() => handleSelect(seat)}
                     title="{seat.id}: {seat.isOccupied ? (seat.passengerName || 'Пассажир') : 'Свободно'}"
                   >
                     <span class="seat-id">{seat.id}</span>
-                    {#if seat.isOccupied}
-                      {#if seat.activeIncident != null || seat.condition === 'annoyed'}
-                        <span class="beacon-call">🔔</span>
-                      {:else if seat.condition === 'sick'}
-                        <span class="beacon-sick">🩺</span>
-                      {:else if seat.ticketStatus === 'validated'}
-                        <span class="beacon-ok">✓</span>
-                      {:else}
-                        <span class="beacon-pending">•</span>
-                      {/if}
-                    {/if}
+                    {@render SeatBeacon(seat)}
                   </button>
                 {/if}
               {/each}
@@ -221,23 +237,13 @@
                     class:selected={currentSeat?.id === seat.id}
                     class:validated={seat.isOccupied && seat.ticketStatus === 'validated'}
                     class:pending={seat.isOccupied && seat.ticketStatus === 'not_checked'}
-                    class:alert={seat.isOccupied && seat.activeIncident != null}
+                    class:alert={seat.isOccupied && seat.activeIncident != null && (typeof seat.activeIncident === 'string' || seat.activeIncident.phase !== 'passive')}
                     class:row-alert={isRowWithIncident(r)}
                     onclick={() => handleSelect(seat)}
                     title="{seat.id}: {seat.isOccupied ? (seat.passengerName || 'Пассажир') : 'Свободно'}"
                   >
                     <span class="seat-id">{seat.id}</span>
-                    {#if seat.isOccupied}
-                      {#if seat.activeIncident != null || seat.condition === 'annoyed'}
-                        <span class="beacon-call">🔔</span>
-                      {:else if seat.condition === 'sick'}
-                        <span class="beacon-sick">🩺</span>
-                      {:else if seat.ticketStatus === 'validated'}
-                        <span class="beacon-ok">✓</span>
-                      {:else}
-                        <span class="beacon-pending">•</span>
-                      {/if}
-                    {/if}
+                    {@render SeatBeacon(seat)}
                   </button>
                 {/if}
               {/each}
@@ -255,23 +261,13 @@
                     class:selected={currentSeat?.id === seat.id}
                     class:validated={seat.isOccupied && seat.ticketStatus === 'validated'}
                     class:pending={seat.isOccupied && seat.ticketStatus === 'not_checked'}
-                    class:alert={seat.isOccupied && seat.activeIncident != null}
+                    class:alert={seat.isOccupied && seat.activeIncident != null && (typeof seat.activeIncident === 'string' || seat.activeIncident.phase !== 'passive')}
                     class:row-alert={isRowWithIncident(r)}
                     onclick={() => handleSelect(seat)}
                     title="{seat.id}: {seat.isOccupied ? (seat.passengerName || 'Пассажир') : 'Свободно'}"
                   >
                     <span class="seat-id">{seat.id}</span>
-                    {#if seat.isOccupied}
-                      {#if seat.activeIncident != null || seat.condition === 'annoyed'}
-                        <span class="beacon-call">🔔</span>
-                      {:else if seat.condition === 'sick'}
-                        <span class="beacon-sick">🩺</span>
-                      {:else if seat.ticketStatus === 'validated'}
-                        <span class="beacon-ok">✓</span>
-                      {:else}
-                        <span class="beacon-pending">•</span>
-                      {/if}
-                    {/if}
+                    {@render SeatBeacon(seat)}
                   </button>
                 {/if}
               {/each}

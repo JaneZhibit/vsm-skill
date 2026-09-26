@@ -413,6 +413,49 @@ export class TrainWorldStore {
       }
     }
 
+    // === ЭМБИЕНТ ПЛАЧУЩЕГО РЕБЕНКА ===
+    const hasCrying = this.seats.some((s) => {
+      if (!s.activeIncident) return false;
+      const incId = typeof s.activeIncident === 'string' ? s.activeIncident : s.activeIncident.incident_id;
+      return incId.includes('crying');
+    });
+    if (hasCrying) {
+      trainAudio.playAmbientLoop('crying_child.mp3', 0.4);
+    } else {
+      trainAudio.stopAmbientLoop('crying_child.mp3');
+    }
+
+    // === КОНТРОЛЬ ПОБУДКИ СПЯЩИХ ПАССАЖИРОВ ПЕРЕД СТАНЦИЕЙ ===
+    const nextSt = this.nextStation;
+    if (nextSt && !nextSt.isTechnical) {
+      const stationSec = timeStringToSeconds(nextSt.plannedTime);
+      const timeToStation = stationSec - t;
+
+      if (timeToStation > 0 && timeToStation <= 600) {
+        for (const s of this.seats) {
+          if (
+            s.isOccupied &&
+            s.passenger &&
+            (s.condition === 'sleeping' || s.passenger.state === 'sleeping') &&
+            (s.passenger.destination.includes(nextSt.label) || nextSt.label.includes(s.passenger.destination))
+          ) {
+            // Менее 2 минут до станции (120 сек) и пассажир не разбужен проводником: штраф
+            if (timeToStation <= 120 && !s.isStationExitReminded && !s.isSleepingMissedPenaltyApplied) {
+              s.isSleepingMissedPenaltyApplied = true;
+              const penalty = 15;
+              conductorState.skills.routine_discipline = Math.max(
+                0,
+                conductorState.skills.routine_discipline - penalty
+              );
+              conductorState.emergencyMessage = `Штраф регламента (-${penalty}): Пассажир на месте ${s.id} не разбужен перед ст. ${nextSt.label}!`;
+              playErrorSound();
+              this.showToast('Штраф регламента', `Пассажир на месте ${s.id} не разбужен перед ст. ${nextSt.label}!`);
+            }
+          }
+        }
+      }
+    }
+
     // === ЛОГИКА ТАЙМЕРА РЕАКЦИИ В ПРОХОДЕ ===
     if (this.currentView === 'aisle' && this.hasActiveIncident && this.reactionTimeLeft > 0) {
       this.reactionTimeLeft -= deltaSec;
@@ -449,11 +492,17 @@ export class TrainWorldStore {
 
   public async syncTripState() {
     try {
-      await apiFetch('/api/v1/simulation/trip/state', {
+      const res = await apiFetch('/api/v1/simulation/trip/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ time_seconds: this.timeSeconds, speed: this.speed, shift_phase: this.shiftPhase }),
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.manifest?.seats) {
+          cabinState.seats = data.manifest.seats.map(convertSeatInfoToPassengerSeat);
+        }
+      }
     } catch {}
   }
 

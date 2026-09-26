@@ -27,7 +27,11 @@ export class CabinStateStore {
 
   get occupiedSeatsCount(): number { return this.seats.filter((s) => s.isOccupied).length; }
   get validatedCount(): number { return this.seats.filter((s) => s.isOccupied && s.ticketStatus === 'validated').length; }
-  get alertSeatsCount(): number { return this.seats.filter((s) => s.isOccupied && s.activeIncident != null).length; }
+  get alertSeatsCount(): number {
+    return this.seats.filter(
+      (s) => s.isOccupied && s.activeIncident != null && (typeof s.activeIncident === 'string' || s.activeIncident.phase !== 'passive')
+    ).length;
+  }
 
   get tverPassengers(): PassengerSeat[] { return this.seats.filter((s) => s.isOccupied && s.destination === 'Тверь'); }
   get tverPassengersCount(): number { return this.tverPassengers.length; }
