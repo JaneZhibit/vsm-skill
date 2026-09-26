@@ -1,0 +1,16 @@
+{
+  "lesson_id": "lesson_master_service",
+  "track": "service",
+  "title": "Мастер-рейс: Двухфазное обучение и Голосовой Экзамен",
+  "description": "Комплексный рейс ВСМ: этап 1 — безопасная отработка рассадки с разбором причин и следствий; этап 2 — голосовой экзамен Voice-to-Action по СТО РЖД 03.011 на скорости 380 км/ч.",
+  "incidents": [
+    {
+      "incident_id": "inc_wrong_seat_01",
+      "delay_seconds": 15
+    },
+    {
+      "incident_id": "inc_voice_exam_01",
+      "delay_seconds": 60
+    }
+  ]
+}

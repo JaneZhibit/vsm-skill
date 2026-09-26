@@ -1,0 +1,53 @@
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: vsm_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - ../backend/app:/app/app
+      - ../backend/data:/app/data
+      - ../backend/tests:/app/tests
+      - ../storage:/app/storage:ro
+    networks:
+      - vsm_network
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: vsm_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=/api/v1
+    networks:
+      - vsm_network
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: vsm_gateway
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../storage:/usr/share/nginx/html/storage:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - vsm_network
+
+networks:
+  vsm_network:
+    driver: bridge
