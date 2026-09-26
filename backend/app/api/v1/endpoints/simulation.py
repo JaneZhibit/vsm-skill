@@ -150,7 +150,7 @@ class LiveScenarioTrigger(BaseModel):
     value: int # Например, 15 (секунд после старта) или 250 (км/ч)
 
 class CustomLiveScenarioPayload(BaseModel):
-    incident_id: str
+    incident_id: Optional[str] = None
     title: str
     target_archetype: str  # "any", "male_young", "female_young", "female_elderly"
     trigger: LiveScenarioTrigger
@@ -165,9 +165,13 @@ LIVE_SCENARIOS_DB = {}
 @router.post("/custom-live-scenario")
 async def create_live_scenario(payload: CustomLiveScenarioPayload):
     """No-Code редактор живых (эмерджентных) ситуаций."""
-    LIVE_SCENARIOS_DB[payload.incident_id] = payload.model_dump()
-    SCENARIOS_DB[payload.incident_id] = {
-        "incident_id": payload.incident_id,
+    import time
+    inc_id = payload.incident_id or f"live_evt_{int(time.time()*1000)}"
+    data = payload.model_dump()
+    data["incident_id"] = inc_id
+    LIVE_SCENARIOS_DB[inc_id] = data
+    SCENARIOS_DB[inc_id] = {
+        "incident_id": inc_id,
         "title": payload.title,
         "phase": "passive" if payload.is_passive else "urgent",
         "passenger_state_during": payload.passenger_state,
@@ -182,7 +186,7 @@ async def create_live_scenario(payload: CustomLiveScenarioPayload):
             }
         }
     }
-    return {"status": "created", "incident_id": payload.incident_id}
+    return {"status": "created", "incident_id": inc_id}
 
 
 class VoiceResolveRequest(BaseModel):
