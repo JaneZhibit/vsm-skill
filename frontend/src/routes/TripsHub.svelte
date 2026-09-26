@@ -291,7 +291,8 @@
 
   async function startVoiceExam() {
     playSuccessSound();
-    await trainWorld.startNewTrip('lesson_master_service');
+    // ИСПРАВЛЕНО: Теперь мы передаем 'pro', чтобы включить нужный UI с микрофоном!
+    await trainWorld.startNewTrip('pro');
     authStore.setRoute('simulator');
   }
 </script>
@@ -488,31 +489,35 @@
     </div>
   </div>
 
-  <!-- ==================== ФИНАЛЬНЫЙ ГОЛОСОВОЙ ЭКЗАМЕН ==================== -->
-  <div class="pt-2 border-t border-[#2d2924]">
-    <div
-      class="p-5 sm:p-6 rounded-2xl border flex flex-col md:flex-row items-center justify-between gap-5 relative overflow-hidden bg-gradient-to-r from-amber-950/60 to-orange-900/20 border-amber-500/60 shadow-[0_0_20px_rgba(245,158,11,0.15)]"
-    >
+  <!-- ==================== ФИНАЛЬНЫЙ ГОЛОСОВОЙ ЭКЗАМЕН (PRO РЕЖИМ) ==================== -->
+  <div class="mt-2 pt-4 border-t border-[#2d2924]">
+    <div class="text-[11px] font-bold text-amber-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+      Боевой режим (Свободная генерация инцидентов)
+    </div>
+
+    <div class="p-5 sm:p-6 rounded-2xl border flex flex-col md:flex-row items-center justify-between gap-5 relative overflow-hidden bg-gradient-to-r from-[#2a1708] to-[#140b04] border-amber-500/50 shadow-[0_0_20px_rgba(245,158,11,0.15)]">
+      
       <div class="flex-1 space-y-2 relative z-10">
         <div class="flex items-center gap-2 flex-wrap">
           <span class="text-2xl">🎙️</span>
-          <h2 class="text-sm sm:text-base font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
-            <span>Мастер-рейс: Голосовой экзамен (Voice-to-Action)</span>
+          <h2 class="text-sm sm:text-base font-bold text-amber-400 uppercase tracking-wider">
+            PRO-Рейс: Голосовой экзамен
           </h2>
           <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">
-            Polza.ai + Gemini 2.5 Flash
+            Без подсказок
           </span>
         </div>
         <p class="text-xs text-[#a39e95] leading-relaxed max-w-2xl">
-          Комплексный рейс ВСМ на скорости до 400 км/ч: этап безопасного обучения с анализом последствий выбора + практический экзамен живой речью в микрофон по 4-шаговой ролевой модели СТО РЖД 03.011.
+          Сценарий будет сгенерирован ИИ-директором на основе ваших слабых зон ЗУН. Инциденты решаются только голосом. Пассажиры (ИИ) будут отвечать вам в реальном времени. Будьте вежливы и соблюдайте регламент!
         </p>
       </div>
 
       <button
         onclick={startVoiceExam}
-        class="relative z-10 shrink-0 px-6 py-3 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-2 bg-gradient-to-r from-amber-600 to-yellow-500 hover:scale-105 text-stone-950 shadow-lg shadow-amber-500/30 cursor-pointer"
+        class="relative z-10 shrink-0 px-6 py-3.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-2 bg-gradient-to-r from-rose-600 via-orange-600 to-amber-500 hover:scale-105 text-white shadow-lg shadow-rose-500/30 cursor-pointer border border-rose-400/50"
       >
-        <span>Начать мастер-рейс ➔</span>
+        <span>🚀 Запустить PRO-рейс ➔</span>
       </button>
     </div>
   </div>

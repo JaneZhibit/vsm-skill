@@ -5,12 +5,6 @@ from typing import List, Union
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Вычисление путей:
-# __file__ = backend/app/core/config.py
-# parents[0] = backend/app/core
-# parents[1] = backend/app
-# parents[2] = backend
-# parents[3] = PROJECT_ROOT
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -31,7 +25,9 @@ class Settings(BaseSettings):
 
     POLZA_API_KEY: str = "your_polza_api_key_here"
     POLZA_BASE_URL: str = "https://polza.ai/api/v1"
-    POLZA_CHAT_MODEL: str = "google/gemini-2.5-flash"
+    POLZA_CHAT_MODEL: str = "google/gemini-3.5-flash-lite"  # Сверхбыстрая легковесная модель
+    POLZA_TTS_MODEL: str = "google/gemini-3.8-flash-tts"
+    POLZA_TTS_FALLBACK_MODEL: str = "google/gemini-3.1-flash-tts-preview"
     POLZA_STT_MODEL: str = "openai/whisper-large-v3-turbo"
 
     CORS_ORIGINS: Union[List[str], str] = [

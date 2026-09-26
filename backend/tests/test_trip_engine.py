@@ -15,7 +15,8 @@ class TestTripEngine(unittest.TestCase):
     def test_new_trip_generation(self):
         """Проверка инициализации рейса: 13-18 пассажиров, 2А — Воронов, нет тех. станций."""
         for _ in range(10):
-            manifest = self.engine.create_new_trip(min_passengers=13, max_passengers=18)
+            trip_data = self.engine.create_new_trip(min_passengers=13, max_passengers=18)
+            manifest = trip_data["manifest"]
             self.assertEqual(manifest.total_seats, 48)
             self.assertGreaterEqual(manifest.occupied_count, 13)
             self.assertLessEqual(manifest.occupied_count, 18)
@@ -57,7 +58,8 @@ class TestTripEngine(unittest.TestCase):
 
     def test_passenger_traits(self):
         """Проверка генерации черт характера (traits) и пола."""
-        manifest = self.engine.create_new_trip(min_passengers=15, max_passengers=15)
+        trip_data = self.engine.create_new_trip(min_passengers=15, max_passengers=15)
+        manifest = trip_data["manifest"]
         for s in manifest.seats:
             if s.is_occupied and s.passenger:
                 self.assertIn(s.passenger.trait, ["polite", "anxious", "demanding"])

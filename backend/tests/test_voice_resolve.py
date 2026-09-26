@@ -20,6 +20,7 @@ class TestVoiceExamAndPolza(unittest.IsolatedAsyncioTestCase):
         self.assertIn("feedback_title", res)
         self.assertIn("feedback_text", res)
         self.assertIn("role_model_steps_covered", res)
+        self.assertIn("passenger_reply", res)
 
     def test_frontend_data_preserves_learning_and_voice(self):
         """Проверка передачи phase, expected_rule, why_correct, what_if_wrong на фронт."""

@@ -24,7 +24,7 @@ async def get_cabin_manifest(user: Dict[str, Any] = Depends(get_current_user)):
     return engine.get_manifest()
 
 class TripInitRequest(BaseModel):
-    mode: str = "adaptive"  # "adaptive" или "level_1"
+    mode: str = "pro"
 
 
 class SpawnSpecificRequest(BaseModel):
@@ -37,16 +37,13 @@ async def create_new_trip(
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Инициализирует новую персональную поездку."""
-    mode = payload.mode if payload else "level_1"
+    mode = payload.mode if payload else "pro"
     engine = trip_manager.create_trip(user["id"])
 
-    # Генерируем таймлайн на бэкенде в зависимости от мода и навыков юзера
-    timeline = engine.generate_timeline(mode=mode, user_skills=user)
+    # Создаем рейс, получаем манифест, таймлайн и стартовые координаты (Тверь или Москва)
+    trip_data = engine.create_new_trip(mode=mode, user=user)
 
-    return {
-        "manifest": engine.get_manifest(),
-        "timeline": timeline,
-    }
+    return trip_data
 
 
 @router.post("/trip/spawn-specific", response_model=CabinManifestResponse)
@@ -54,17 +51,15 @@ async def trigger_specific_incident(
     payload: SpawnSpecificRequest,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """Вызывается фронтендом, когда таймлайн доходит до конкретного инцидента."""
     engine = trip_manager.get_trip(user["id"])
-    engine.spawn_random_incident(force_incident=payload.incident_id)
+    engine.spawn_incident(force_incident=payload.incident_id)
     return engine.get_manifest()
 
 
 @router.post("/trip/spawn-random", response_model=CabinManifestResponse)
 async def trigger_random_incident(user: Dict[str, Any] = Depends(get_current_user)):
-    """Вызывается фронтендом, когда таймлайн доходит до слота рандомного инцидента."""
     engine = trip_manager.get_trip(user["id"])
-    engine.spawn_random_incident()
+    engine.spawn_incident()
     return engine.get_manifest()
 
 @router.post("/trip/station-event", response_model=StationEventResponse)
@@ -109,37 +104,40 @@ class ResolveIncidentRequest(BaseModel):
 
 @router.post("/resolve-incident")
 async def resolve_simulation_incident(payload: ResolveIncidentRequest, user: Dict[str, Any] = Depends(get_current_user)):
-    """Безопасная обработка инцидента. Роутер только маршрутизирует, всё остальное делают сервисы."""
-    
-    # 1. Получаем результаты сценария с бэкенда (никто не сможет считерить с фронта)
     scenario_result = get_scenario_result(payload.incident_id, payload.option_id)
     if not scenario_result:
         raise HTTPException(status_code=400, detail="Неверный ID инцидента или опции")
 
-    # 2. Логируем в БД и обновляем скиллы пользователя
-    safety_delta = scenario_result.get("safety_delta", 0)
+    engine = trip_manager.get_trip(user["id"])
+    
+    # Сначала защищаем от штрафов, если это Урок
+    protected_result = engine.game_master.apply_lesson_protection(scenario_result)
+
+    # 🦋 ЭФФЕКТ БАБОЧКИ для кнопочного выбора (например opt_2 в inc_kinetosis_01) 🦋
+    incident_meta = SCENARIOS_DB.get(payload.incident_id, {})
+    step1 = incident_meta.get("steps", {}).get("step_1", {})
+    chosen_opt = next((o for o in step1.get("options", []) if o.get("id") == payload.option_id), {})
+    if chosen_opt.get("next_step") == "trigger_medic" or protected_result.get("butterfly_effect") == "inc_medic_search":
+        engine.game_master.spawn_incident(engine.passenger_manager.seats, force_incident="inc_medic_search")
+
+    # Логируем в БД уже защищенные баллы
     updated_user = await log_action(
         user_id=user["id"],
         incident_id=payload.incident_id,
         option_id=payload.option_id,
-        loyalty_delta=scenario_result["loyalty_delta"],
-        safety_delta=safety_delta,
-        feedback=scenario_result["feedback"],
+        loyalty_delta=protected_result["loyalty_delta"],
+        safety_delta=protected_result.get("safety_delta", 0),
+        feedback=protected_result.get("feedback", ""),
     )
     
-    # 3. Делегируем обновление вагона движку (Инкапсуляция!)
-    engine = trip_manager.get_trip(user["id"])
-    engine.resolve_incident(
-        incident_id=payload.incident_id,
-        new_mood=scenario_result["mood"],
-        loyalty_delta=scenario_result.get("loyalty_delta", 0)
-    )
+    # Обновляем вагон
+    engine.resolve_incident(payload.incident_id, protected_result)
 
     return {
         "status": "resolved",
         "user": updated_user,
-        "incident_result": scenario_result,
-        "manifest": engine.get_manifest() # Отдаем обновленный вагон
+        "incident_result": protected_result,
+        "manifest": engine.get_manifest()
     }
 
 
@@ -206,21 +204,11 @@ class VoiceResolveRequest(BaseModel):
     passenger_prompt: Optional[str] = ""
     expected_rule: Optional[str] = ""
 
-
 @router.post("/trip/voice-resolve")
 async def resolve_voice_incident(
     payload: VoiceResolveRequest,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """
-    Принимает аудиозапись с микрофона проводника (в формате base64),
-    транскрибирует через Whisper (Polza.ai) и оценивает через Gemini 2.5 Flash.
-    """
-    print(f"\n========================================================")
-    print(f"🎙️ [VOICE-EXAM] Получен запрос по инциденту: {payload.incident_id}")
-    print(f"========================================================")
-
-    # 1. Получаем текст: либо транскрибируем аудио через Whisper, либо берем переданный текст
     conductor_speech = ""
     if payload.audio_base64:
         conductor_speech = await polza_ai.transcribe_audio_base64(payload.audio_base64, "audio/webm")
@@ -228,71 +216,113 @@ async def resolve_voice_incident(
         conductor_speech = payload.conductor_text.strip()
 
     if not conductor_speech:
-        print("[VOICE-EXAM] Ошибка: речь не была распознана")
         return {
             "status": "empty_speech",
-            "transcription": "",
             "incident_result": {
                 "loyalty_delta": 0,
                 "safety_delta": 0,
                 "mood": "annoyed",
+                "passenger_reply": "Вы что-то сказали? Я не расслышал.",
                 "feedback_title": "Голос не распознан",
-                "feedback": "Не удалось разобрать слова. Пожалуйста, повторите ответ четче в микрофон.",
-                "is_passed": False,
-                "role_model_steps": [],
-                "transcription": ""
+                "feedback": "Повторите четче.",
+                "is_passed": False
             }
         }
 
-    # 2. Оцениваем через Gemini Flash (Polza.ai)
+    engine = trip_manager.get_trip(user["id"])
     incident_meta = SCENARIOS_DB.get(payload.incident_id, {})
-    incident_title = incident_meta.get("title", payload.incident_id)
+    ai_persona = incident_meta.get("ai_persona", "Ты обычный пассажир поезда.")
 
+    # Добавляем контекст архетипа пассажира для LLM
+    active_seat = next((s for s in engine.passenger_manager.seats if s.active_incident), None)
+    if active_seat and active_seat.passenger:
+        arch = active_seat.passenger.archetype_id
+        trait = active_seat.passenger.trait
+        trait_desc = {"polite": "вежливая", "demanding": "требовательная", "anxious": "тревожная"} if "female" in arch else {"polite": "вежливый", "demanding": "требовательный", "anxious": "тревожный"}
+        t_desc = trait_desc.get(trait, "")
+
+        if arch == "male_young":
+            ai_persona += f" Твоя роль: Молодой парень. Характер: {t_desc}."
+        elif arch == "female_young":
+            ai_persona += f" Твоя роль: Молодая девушка. Характер: {t_desc}."
+        elif arch == "female_elderly":
+            ai_persona += f" Твоя роль: Пожилая женщина. Характер: {t_desc}."
+
+    # 1. Получаем текстовый ответ от LLM
     eval_result = await polza_ai.evaluate_conductor_voice_response(
-        incident_title=incident_title,
-        passenger_prompt=payload.passenger_prompt or "",
+        incident_title=incident_meta.get("title", payload.incident_id),
+        passenger_prompt=payload.passenger_prompt,
         conductor_text=conductor_speech,
-        expected_rule=payload.expected_rule or "СТО РЖД 03.011: Соблюдение комфорта и безопасности в скоростном движении",
+        expected_rule=payload.expected_rule or "СТО РЖД 03.011",
+        ai_persona=ai_persona,
+        conductor_gender=user.get("gender", "m")
     )
+    eval_result = engine.game_master.apply_lesson_protection(eval_result)
 
-    loyalty_delta = int(eval_result.get("loyalty_delta", 15))
-    safety_delta = int(eval_result.get("safety_delta", 20))
-    feedback = eval_result.get("feedback_text", "Ответ оценен.")
-    is_passed = eval_result.get("is_passed", True)
-    mood = "calm" if is_passed else "annoyed"
+    # 2. Ищем пассажира, чтобы понять его АРХЕТИП для голоса TTS
+    passenger_voice = "Leda"  # Девушка по умолчанию
+    if active_seat and active_seat.passenger:
+        arch = active_seat.passenger.archetype_id
+        if arch == "male_young":
+            passenger_voice = "Puck"
+        elif arch == "female_elderly":
+            passenger_voice = "Sulafat"
+        else:
+            passenger_voice = "Leda"
 
-    # 3. Фиксируем в базе данных прогресс проводника
+    # 3. Синтезируем аудио ответа пассажира
+    passenger_reply_text = eval_result.get("passenger_reply", "")
+    passenger_audio_b64 = None
+    if passenger_reply_text:
+        passenger_audio_b64 = await polza_ai.generate_speech_base64(passenger_reply_text, voice=passenger_voice)
+
+    # Эффект бабочки
+    if "butterfly_effect" in eval_result:
+        engine.game_master.spawn_incident(engine.passenger_manager.seats, force_incident=eval_result["butterfly_effect"])
+        engine.resolve_incident(payload.incident_id, eval_result)
+        return {
+            "status": "resolved",
+            "transcription": conductor_speech,
+            "manifest": engine.get_manifest(),
+            "incident_result": {
+                "loyalty_delta": 0,
+                "safety_delta": 0,
+                "mood": "sick",
+                "is_passed": True,
+                "passenger_reply": passenger_reply_text,
+                "passenger_audio_base64": passenger_audio_b64,
+                "feedback": f"Пассажир ответил: «{passenger_reply_text}». Вы перешли к поиску помощи.",
+                "feedback_title": "Эффект бабочки",
+                "transcription": conductor_speech,
+            },
+        }
+
+    # Обычное решение
     updated_user = await log_action(
         user_id=user["id"],
         incident_id=payload.incident_id,
         option_id="voice_response",
-        loyalty_delta=loyalty_delta,
-        safety_delta=safety_delta,
-        feedback=feedback,
+        loyalty_delta=eval_result.get("loyalty_delta", 0),
+        safety_delta=eval_result.get("safety_delta", 0),
+        feedback=eval_result.get("feedback_text", ""),
     )
-
-    # 4. Обновляем статус вагона
-    engine = trip_manager.get_trip(user["id"])
-    engine.resolve_incident(
-        incident_id=payload.incident_id,
-        new_mood=mood,
-        loyalty_delta=loyalty_delta,
-    )
+    engine.resolve_incident(payload.incident_id, eval_result)
 
     return {
         "status": "resolved",
         "transcription": conductor_speech,
-        "evaluation": eval_result,
         "user": updated_user,
         "manifest": engine.get_manifest(),
         "incident_result": {
-            "loyalty_delta": loyalty_delta,
-            "safety_delta": safety_delta,
-            "mood": mood,
-            "feedback": feedback,
-            "feedback_title": eval_result.get("feedback_title", "Анализ ответа проводника"),
+            "loyalty_delta": eval_result.get("loyalty_delta", 0),
+            "safety_delta": eval_result.get("safety_delta", 0),
+            "mood": eval_result.get("mood", "calm"),
+            "passenger_reply": passenger_reply_text,
+            "passenger_audio_base64": passenger_audio_b64,
+            "feedback": eval_result.get("feedback_text", "Оценено."),
+            "feedback_title": eval_result.get("feedback_title", "Анализ ответа"),
             "role_model_steps": eval_result.get("role_model_steps_covered", []),
-            "is_passed": is_passed,
+            "is_passed": eval_result.get("is_passed", True),
             "transcription": conductor_speech,
         },
     }

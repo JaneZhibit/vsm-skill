@@ -8,6 +8,7 @@
   import Studio from './routes/Studio.svelte';
   import NavigationShell from './lib/components/NavigationShell.svelte';
   import DebugBar from './lib/components/DebugBar.svelte';
+  import AchievementToast from './lib/components/AchievementToast.svelte';
   import { authStore } from './lib/stores/authStore.svelte';
   import { trainWorld } from './lib/stores/trainWorld.svelte';
 
@@ -37,6 +38,12 @@
         <span class="text-xs sm:text-sm font-semibold tracking-wide text-[#f5f3ef]">
           Вагон 1-го класса • Рейс № 754
         </span>
+
+        <!-- ДОБАВЛЕННЫЙ БЛОК: Очки в реальном времени -->
+        <div class="hidden sm:flex items-center gap-3 ml-4 px-3 py-1 bg-black/50 rounded-lg border border-[#3d3831] text-xs font-mono shadow-inner">
+          <span class="text-amber-400" title="Лояльность">🤝 {trainWorld.loyaltyScore}</span>
+          <span class="text-emerald-400" title="Безопасность">🛡️ {trainWorld.safetyScore}</span>
+        </div>
       </div>
       <div class="flex items-center gap-2">
         <!-- Кнопка управления фоновым звуком поезда -->
@@ -87,4 +94,7 @@
   {#if showDebugBar}
     <DebugBar />
   {/if}
+
+  <!-- Глобальный тост достижений -->
+  <AchievementToast />
 </main>
