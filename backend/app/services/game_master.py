@@ -1,12 +1,12 @@
 import random
 from typing import Dict, Any, List, Optional
-from app.schemas.passenger import ActiveIncidentSchema, SeatInfo
+from app.schemas.passenger import ActiveIncidentSchema, ScenarioStepSchema, SeatInfo
 from app.services.scenarios import SCENARIOS_DB, get_frontend_incident_data
 from app.services.lessons import LESSONS_DB
 
 class GameMaster:
     """Оркестратор событий и инцидентов (State Machine).
-    Обрабатывает тики времени и динамические состояния пассажиров."""
+    Обрабатывает тики времени, эмерджентные триггеры и динамические состояния пассажиров."""
 
     def __init__(self):
         self.current_mode = "pro"
@@ -21,134 +21,56 @@ class GameMaster:
         self.crying_start_time = None
         self.crying_seat_id = None
         self.neighbor_complained = False
+        self.active_triggers = []
 
         if mode.startswith("lesson_"):
-            self.active_triggers = []
             return
 
-        # Триггеры для режима PRO:
-        # 1. 14:01:40 (start + 100) -> Пассивный пьяный пассажир (phase="passive")
-        # 2. 14:06:00 (start + 360) -> Плачущий ребёнок (phase="ambient")
-        # 3. 14:18:00 (start + 1080) -> Пролитый горячий чай (phase="urgent")
-        # 4. 14:32:00 (start + 1920) -> Вейпер в салоне (phase="urgent")
-        self.active_triggers = [
+        # 1. Подгружаем все созданные в Студии "Живые сценарии"
+        try:
+            from app.api.v1.endpoints.simulation import LIVE_SCENARIOS_DB
+            for inc_id, sc in LIVE_SCENARIOS_DB.items():
+                trigger_time = start_time + sc["trigger"]["value"] if sc.get("trigger", {}).get("type") == "time" else start_time + 60
+                self.active_triggers.append({
+                    "id": inc_id,
+                    "time_trigger": trigger_time,
+                    "action": "custom_live_event",
+                    "payload": sc
+                })
+        except Exception as e:
+            print(f"Error loading LIVE_SCENARIOS_DB: {e}")
+
+        # 2. Базовые встроенные триггеры
+        self.active_triggers.extend([
             {
                 "id": "trig_drunk",
                 "incident_id": "live_drunk",
-                "time_sec": start_time + 100,
-                "triggered": False,
+                "time_trigger": start_time + 100,
+                "action": "builtin",
                 "phase": "passive",
             },
             {
                 "id": "trig_crying",
                 "incident_id": "live_crying_child",
-                "time_sec": start_time + 360,
-                "triggered": False,
+                "time_trigger": start_time + 360,
+                "action": "builtin",
                 "phase": "ambient",
             },
             {
                 "id": "trig_tea",
                 "incident_id": "live_spilled_tea",
-                "time_sec": start_time + 1080,
-                "triggered": False,
+                "time_trigger": start_time + 1080,
+                "action": "builtin",
                 "phase": "urgent",
             },
             {
                 "id": "trig_vaper",
                 "incident_id": "live_vaper",
-                "time_sec": start_time + 1920,
-                "triggered": False,
+                "time_trigger": start_time + 1920,
+                "action": "builtin",
                 "phase": "urgent",
             },
-        ]
-
-    def process_tick(self, current_time: float, seats: List[SeatInfo]) -> List[Dict[str, Any]]:
-        """Обрабатывает тик времени (вызывается на каждые 5 сек синхронизации или локальном тике).
-        Возвращает список новых событий, если они активировались."""
-        fired_events = []
-        occupied = [s for s in seats if s.is_occupied and s.passenger]
-        if not occupied:
-            return fired_events
-
-        # 1. Проверяем запланированные триггеры
-        for trig in self.active_triggers:
-            if not trig["triggered"] and current_time >= trig["time_sec"]:
-                trig["triggered"] = True
-                inc_id = trig["incident_id"]
-
-                # Выбираем подходящее кресло
-                candidates = [s for s in occupied if not s.active_incident]
-                if not candidates:
-                    candidates = occupied
-
-                if inc_id == "live_crying_child":
-                    target_seat = next((s for s in candidates if s.passenger.archetype_id == "female_young"), random.choice(candidates))
-                elif inc_id == "live_drunk":
-                    target_seat = next((s for s in candidates if s.passenger.archetype_id == "male_young"), random.choice(candidates))
-                else:
-                    target_seat = random.choice(candidates)
-
-                inc_data = get_frontend_incident_data(inc_id)
-                if inc_data:
-                    inc_data["phase"] = trig.get("phase", inc_data.get("phase", "urgent"))
-                    target_seat.active_incident = ActiveIncidentSchema(**inc_data)
-
-                    # Меняем состояние и спрайт пассажира
-                    if inc_id == "live_drunk":
-                        target_seat.passenger.state = "drunk"
-                        target_seat.passenger.sprite_url = f"/assets/passengers/{target_seat.passenger.archetype_id}/drunk.png"
-                    elif inc_id == "live_crying_child":
-                        self.crying_start_time = current_time
-                        self.crying_seat_id = target_seat.seat_id
-                        target_seat.passenger.state = "annoyed"
-                        target_seat.passenger.sprite_url = f"/assets/passengers/{target_seat.passenger.archetype_id}/annoyed.png"
-                    else:
-                        target_seat.passenger.state = "annoyed"
-                        target_seat.passenger.sprite_url = f"/assets/passengers/{target_seat.passenger.archetype_id}/annoyed.png"
-
-                    fired_events.append({
-                        "type": "incident_spawned",
-                        "incident_id": inc_id,
-                        "seat_id": target_seat.seat_id,
-                        "phase": inc_data["phase"],
-                    })
-
-        # 2. Проверяем таймаут детского плача: жалоба соседа через 60 секунд!
-        if self.crying_start_time and not self.neighbor_complained:
-            crying_seat = next((s for s in seats if s.seat_id == self.crying_seat_id), None)
-            has_crying = False
-            if crying_seat and crying_seat.active_incident:
-                c_inc = getattr(crying_seat.active_incident, "incident_id", None)
-                if c_inc == "live_crying_child":
-                    has_crying = True
-
-            if has_crying:
-                if current_time - self.crying_start_time >= 60:
-                    neighbor_candidates = [
-                        s for s in occupied 
-                        if s.seat_id != self.crying_seat_id and not s.active_incident and abs(s.row - crying_seat.row) <= 1
-                    ]
-                    if not neighbor_candidates:
-                        neighbor_candidates = [s for s in occupied if s.seat_id != self.crying_seat_id and not s.active_incident]
-
-                    if neighbor_candidates:
-                        neighbor_seat = random.choice(neighbor_candidates)
-                        inc_data = get_frontend_incident_data("live_neighbor_complaint")
-                        if inc_data:
-                            neighbor_seat.active_incident = ActiveIncidentSchema(**inc_data)
-                            neighbor_seat.passenger.state = "annoyed"
-                            neighbor_seat.passenger.sprite_url = f"/assets/passengers/{neighbor_seat.passenger.archetype_id}/annoyed.png"
-                            self.neighbor_complained = True
-                            fired_events.append({
-                                "type": "incident_spawned",
-                                "incident_id": "live_neighbor_complaint",
-                                "seat_id": neighbor_seat.seat_id,
-                                "phase": "urgent",
-                            })
-            else:
-                self.crying_start_time = None
-
-        return fired_events
+        ])
 
     def generate_timeline(self, mode: str = "pro", user: Optional[Dict[str, Any]] = None) -> dict:
         self.current_mode = mode
@@ -186,36 +108,17 @@ class GameMaster:
                             "payload": item["incident_id"]
                         })
                 
+                self.active_triggers = []
                 return {"timeline": timeline, "start_time": start_time_sec, "start_phase": start_phase}
 
         # РЕЖИМ: PRO. Начинаем с Москвы (14:00 -> 50400 сек)
         start_time_sec = 50400
         start_phase = "initial_round"
-        
-        # Адаптивный выбор инцидентов на основе слабых мест проводника
-        skills = {
-            "medicine": user.get("first_aid", 40),
-            "safety": user.get("safety_tech", 100),
-            "service": user.get("service_psychology", 85),
-            "discipline": user.get("routine_discipline", 65)
-        }
-        weakest = min(skills.keys(), key=lambda k: skills[k])
+        self.init_triggers(mode=mode, start_time=start_time_sec)
 
-        pool = []
-        for inc_id in SCENARIOS_DB.keys():
-            if weakest == "medicine" and ("med" in inc_id or "kinetosis" in inc_id):
-                pool.append(inc_id)
-            elif weakest == "safety" and ("vape" in inc_id or "bag" in inc_id or "luggage" in inc_id):
-                pool.append(inc_id)
-            elif weakest == "service" and ("noise" in inc_id or "broken" in inc_id or "seat" in inc_id):
-                pool.append(inc_id)
-
+        # Формируем контрольные точки для таймлайна
+        pool = list(SCENARIOS_DB.keys())
         random.shuffle(pool)
-        if len(pool) < 4:
-            remaining = [k for k in SCENARIOS_DB.keys() if k not in pool]
-            random.shuffle(remaining)
-            pool.extend(remaining)
-
         selected_incidents = pool[:4]
 
         checkpoints_sec = [50880, 52200, 54240, 55920]
@@ -229,6 +132,134 @@ class GameMaster:
             })
 
         return {"timeline": timeline, "start_time": start_time_sec, "start_phase": start_phase}
+
+    def process_tick(self, current_time: float, seats: List[SeatInfo]) -> List[Dict]:
+        events_to_fire = []
+        remaining = []
+        for trigger in self.active_triggers:
+            trig_time = trigger.get("time_trigger", trigger.get("time_sec", 0))
+            if current_time >= trig_time:
+                events_to_fire.append(trigger)
+                if trigger.get("action") == "custom_live_event":
+                    self._execute_live_scenario(trigger["payload"], seats)
+                else:
+                    self._execute_builtin_trigger(trigger, current_time, seats)
+            else:
+                remaining.append(trigger)
+        self.active_triggers = remaining
+
+        # Проверяем таймаут детского плача: жалоба соседа через 60 секунд!
+        if self.crying_start_time and not self.neighbor_complained:
+            crying_seat = next((s for s in seats if s.seat_id == self.crying_seat_id), None)
+            has_crying = False
+            if crying_seat and crying_seat.active_incident:
+                c_inc = getattr(crying_seat.active_incident, "incident_id", None)
+                if c_inc == "live_crying_child":
+                    has_crying = True
+
+            if has_crying:
+                if current_time - self.crying_start_time >= 60:
+                    occupied = [s for s in seats if s.is_occupied and s.passenger]
+                    neighbor_candidates = [
+                        s for s in occupied 
+                        if s.seat_id != self.crying_seat_id and not s.active_incident and abs(s.row - crying_seat.row) <= 1
+                    ]
+                    if not neighbor_candidates:
+                        neighbor_candidates = [s for s in occupied if s.seat_id != self.crying_seat_id and not s.active_incident]
+
+                    if neighbor_candidates:
+                        neighbor_seat = random.choice(neighbor_candidates)
+                        inc_data = get_frontend_incident_data("live_neighbor_complaint")
+                        if inc_data:
+                            neighbor_seat.active_incident = ActiveIncidentSchema(**inc_data)
+                            neighbor_seat.passenger.state = "annoyed"
+                            neighbor_seat.passenger.sprite_url = f"/assets/passengers/{neighbor_seat.passenger.archetype_id}/annoyed.png"
+                            self.neighbor_complained = True
+                            events_to_fire.append({
+                                "type": "incident_spawned",
+                                "incident_id": "live_neighbor_complaint",
+                                "seat_id": neighbor_seat.seat_id,
+                                "phase": "urgent",
+                            })
+            else:
+                self.crying_start_time = None
+
+        return events_to_fire
+
+    def _execute_live_scenario(self, scenario: dict, seats: List[SeatInfo]):
+        # Ищем подходящего пассажира
+        occupied = [s for s in seats if s.is_occupied and s.passenger]
+        if not occupied:
+            return
+        
+        target_arch = scenario.get("target_archetype", "any")
+        valid_seats = occupied if target_arch == "any" else [s for s in occupied if s.passenger.archetype_id == target_arch]
+        
+        if not valid_seats:
+            valid_seats = occupied # Фолбэк, если нужного типа нет
+            
+        seat = random.choice(valid_seats)
+        
+        # Применяем состояние
+        new_state = scenario.get("passenger_state", "annoyed")
+        seat.passenger.state = new_state
+        
+        # Обновляем спрайт
+        seat.passenger.sprite_url = f"/assets/passengers/{seat.passenger.archetype_id}/{new_state}.png"
+        
+        is_passive = scenario.get("is_passive", False)
+        phase_str = "passive" if is_passive else "urgent"
+
+        seat.active_incident = ActiveIncidentSchema(
+            incident_id=scenario["incident_id"],
+            title=scenario["title"],
+            phase=phase_str,
+            start_step="step_1",
+            steps={
+                "step_1": ScenarioStepSchema(
+                    prompt=scenario["llm_system_prompt"],
+                    expected_rule=scenario["expected_rule"],
+                    phase=phase_str,
+                    options=[]
+                )
+            }
+        )
+
+    def _execute_builtin_trigger(self, trigger: dict, current_time: float, seats: List[SeatInfo]):
+        inc_id = trigger.get("incident_id")
+        if not inc_id:
+            return
+        occupied = [s for s in seats if s.is_occupied and s.passenger]
+        if not occupied:
+            return
+
+        candidates = [s for s in occupied if not s.active_incident]
+        if not candidates:
+            candidates = occupied
+
+        if inc_id == "live_crying_child":
+            target_seat = next((s for s in candidates if s.passenger.archetype_id == "female_young"), random.choice(candidates))
+        elif inc_id == "live_drunk":
+            target_seat = next((s for s in candidates if s.passenger.archetype_id == "male_young"), random.choice(candidates))
+        else:
+            target_seat = random.choice(candidates)
+
+        inc_data = get_frontend_incident_data(inc_id)
+        if inc_data:
+            inc_data["phase"] = trigger.get("phase", inc_data.get("phase", "urgent"))
+            target_seat.active_incident = ActiveIncidentSchema(**inc_data)
+
+            if inc_id == "live_drunk":
+                target_seat.passenger.state = "drunk"
+                target_seat.passenger.sprite_url = f"/assets/passengers/{target_seat.passenger.archetype_id}/drunk.png"
+            elif inc_id == "live_crying_child":
+                self.crying_start_time = current_time
+                self.crying_seat_id = target_seat.seat_id
+                target_seat.passenger.state = "annoyed"
+                target_seat.passenger.sprite_url = f"/assets/passengers/{target_seat.passenger.archetype_id}/annoyed.png"
+            else:
+                target_seat.passenger.state = "annoyed"
+                target_seat.passenger.sprite_url = f"/assets/passengers/{target_seat.passenger.archetype_id}/annoyed.png"
 
     def spawn_incident(self, seats: List[SeatInfo], force_incident: Optional[str] = None) -> None:
         """Назначает инцидент случайному пассажиру."""

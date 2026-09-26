@@ -145,56 +145,40 @@ async def resolve_simulation_incident(payload: ResolveIncidentRequest, user: Dic
     }
 
 
-class CustomScenarioPayload(BaseModel):
+class LiveScenarioTrigger(BaseModel):
+    type: str  # "time", "speed", "station"
+    value: int # Например, 15 (секунд после старта) или 250 (км/ч)
+
+class CustomLiveScenarioPayload(BaseModel):
     incident_id: str
     title: str
-    prompt: str
-    timer_seconds: int = 15
-    opt_1_text: str
-    opt_1_feedback: str
-    opt_1_loyalty: int = 15
-    opt_1_safety: int = 20
-    opt_2_text: str
-    opt_2_feedback: str
-    opt_2_loyalty: int = -20
-    opt_2_safety: int = -15
+    target_archetype: str  # "any", "male_young", "female_young", "female_elderly"
+    trigger: LiveScenarioTrigger
+    passenger_state: str   # "vaping", "drunk", "crying", "angry", "sleeping"
+    is_passive: bool       # Если True - нет красного колокольчика, просто меняется стейт
+    llm_system_prompt: str # Что ИИ должен отыгрывать (напр. "Ты куришь вейп...")
+    expected_rule: str     # Что должен сказать проводник (для оценки LLM)
 
+# Глобальный реестр пользовательских живых сценариев
+LIVE_SCENARIOS_DB = {}
 
-@router.post("/custom-scenario")
-async def create_custom_scenario(payload: CustomScenarioPayload):
-    """Позволяет добавить сценарий прямо из UI Студии без изменения кода ядра!"""
+@router.post("/custom-live-scenario")
+async def create_live_scenario(payload: CustomLiveScenarioPayload):
+    """No-Code редактор живых (эмерджентных) ситуаций."""
+    LIVE_SCENARIOS_DB[payload.incident_id] = payload.model_dump()
     SCENARIOS_DB[payload.incident_id] = {
+        "incident_id": payload.incident_id,
         "title": payload.title,
-        "passenger_state_during": "annoyed",
+        "phase": "passive" if payload.is_passive else "urgent",
+        "passenger_state_during": payload.passenger_state,
+        "ai_persona": payload.llm_system_prompt,
         "start_step": "step_1",
         "steps": {
             "step_1": {
-                "prompt": payload.prompt,
-                "timer_seconds": payload.timer_seconds,
-                "options": [
-                    {
-                        "id": "opt_1",
-                        "text": payload.opt_1_text,
-                        "action_type": "click",
-                        "result": {
-                            "loyalty_delta": payload.opt_1_loyalty,
-                            "safety_delta": payload.opt_1_safety,
-                            "mood": "calm",
-                            "feedback": payload.opt_1_feedback
-                        }
-                    },
-                    {
-                        "id": "opt_2",
-                        "text": payload.opt_2_text,
-                        "action_type": "click",
-                        "result": {
-                            "loyalty_delta": payload.opt_2_loyalty,
-                            "safety_delta": payload.opt_2_safety,
-                            "mood": "annoyed",
-                            "feedback": payload.opt_2_feedback
-                        }
-                    }
-                ]
+                "prompt": payload.llm_system_prompt,
+                "expected_rule": payload.expected_rule,
+                "phase": "passive" if payload.is_passive else "urgent",
+                "options": []
             }
         }
     }

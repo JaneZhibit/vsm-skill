@@ -1,22 +1,20 @@
 <script lang="ts">
   import { playClickSound, playSuccessSound, playErrorSound } from '../lib/utils/audio';
 
-  let activeTab = $state<'cases' | 'handbook' | 'constructor'>('cases');
+  let activeTab = $state<'cases' | 'handbook' | 'constructor'>('constructor');
 
-  // Поля формы No-Code конструктора сценариев
-  let customTitle = $state<string>('Пассажир громко слушает музыку без наушников');
-  let customPrompt = $state<string>('«А что такого? Я в своем купе... то есть кресле, трек классный! Наденьте беруши, если не нравится!»');
-  let customTimer = $state<number>(15);
+  // --- ПОЛЯ НОВОГО СОБЫТИЙНОГО РЕДАКТОРА ---
+  let customTitle = $state<string>('Пассажир курит вейп в кресле');
+  let targetArchetype = $state<string>('any');
+  
+  let triggerType = $state<string>('time');
+  let triggerValue = $state<number>(15); // Через сколько секунд после старта сработает
 
-  let opt1Text = $state<string>('Вежливо сослаться на п. 4.12 СТО РЖД о звуковом комфорте и предложить фирменные наушники ВСМ.');
-  let opt1Feedback = $state<string>('Идеально (СТО РЖД 03.011). Предотвратили конфликт между пассажирами и предложили премиальный сервис.');
-  let opt1Loyalty = $state<number>(15);
-  let opt1Safety = $state<number>(10);
-
-  let opt2Text = $state<string>('Выдернуть телефон из рук или пригрозить вызовом наряда полиции.');
-  let opt2Feedback = $state<string>('Грубое нарушение корпоративного стандарта РЖД. Эскалация конфликта и превышение полномочий.');
-  let opt2Loyalty = $state<number>(-30);
-  let opt2Safety = $state<number>(-15);
+  let passengerState = $state<string>('vaping');
+  let isPassive = $state<boolean>(true); // Без красного колокольчика
+  
+  let llmSystemPrompt = $state<string>('Ты куришь электронную сигарету. Если проводник вежливо просит убрать её, сославшись на датчики дыма - извинись и убери. Если хамит - скандаль.');
+  let expectedRule = $state<string>('Запрет курения (в т.ч. электронных сигарет) по требованиям пожарной безопасности. СТО РЖД п. 4.1.2.');
 
   let isSaving = $state<boolean>(false);
   let successMessage = $state<string | null>(null);
@@ -29,22 +27,21 @@
     errorMessage = null;
 
     const payload = {
-      incident_id: `custom_inc_${Date.now()}`,
-      title: customTitle.trim() || 'Пользовательский инцидент',
-      prompt: customPrompt.trim() || 'Обращение пассажира',
-      timer_seconds: Number(customTimer) || 15,
-      opt_1_text: opt1Text.trim(),
-      opt_1_feedback: opt1Feedback.trim(),
-      opt_1_loyalty: Number(opt1Loyalty) || 15,
-      opt_1_safety: Number(opt1Safety) || 10,
-      opt_2_text: opt2Text.trim(),
-      opt_2_feedback: opt2Feedback.trim(),
-      opt_2_loyalty: Number(opt2Loyalty) || -20,
-      opt_2_safety: Number(opt2Safety) || -10,
+      incident_id: `live_evt_${Date.now()}`,
+      title: customTitle.trim(),
+      target_archetype: targetArchetype,
+      trigger: {
+        type: triggerType,
+        value: Number(triggerValue)
+      },
+      passenger_state: passengerState,
+      is_passive: isPassive,
+      llm_system_prompt: llmSystemPrompt.trim(),
+      expected_rule: expectedRule.trim()
     };
 
     try {
-      const res = await fetch('/api/v1/simulation/custom-scenario', {
+      const res = await fetch('/api/v1/simulation/custom-live-scenario', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -52,13 +49,13 @@
 
       if (res.ok) {
         playSuccessSound();
-        successMessage = 'Сценарий успешно добавлен в базу и готов к проверке в симуляторе!';
+        successMessage = 'Эмерджентное событие добавлено! Запустите PRO-Рейс, чтобы проверить.';
       } else {
         throw new Error(`Ошибка сервера: ${res.status}`);
       }
     } catch (err: any) {
       playErrorSound();
-      errorMessage = err?.message || 'Не удалось сохранить сценарий';
+      errorMessage = err?.message || 'Не удалось сохранить событие';
     } finally {
       isSaving = false;
     }
@@ -68,214 +65,124 @@
 <div class="w-full max-w-5xl mx-auto p-4 sm:p-6 flex flex-col gap-6">
   <header class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#2d2924] pb-4">
     <div>
-      <h1 class="text-lg sm:text-xl font-bold text-[#f5f3ef] tracking-wide">Студия регламентов и разборов</h1>
-      <p class="text-xs text-[#a39e95] mt-0.5">База знаний СТО РЖД 2026 и No-Code конструктор новых сценариев</p>
+      <h1 class="text-lg sm:text-xl font-bold text-[#f5f3ef] tracking-wide">Студия сценариев</h1>
+      <p class="text-xs text-[#a39e95] mt-0.5">Создание эмерджентных (живых) ситуаций для PRO-симуляции</p>
     </div>
-    <div class="bg-[#1a1816] p-1 rounded-xl border border-[#2d2924] inline-flex gap-1 flex-wrap">
-      <button
-        onclick={() => { activeTab = 'cases'; playClickSound(); }}
-        class="px-3.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all {activeTab === 'cases' ? 'bg-[#282420] text-amber-300 border border-[#3d3831] shadow-sm' : 'text-[#a39e95]'}"
-      >
-        Разбор ошибок
+    <div class="bg-[#1a1816] p-1 rounded-xl border border-[#2d2924] inline-flex gap-1">
+      <button onclick={() => { activeTab = 'constructor'; playClickSound(); }} class="px-3.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all {activeTab === 'constructor' ? 'bg-amber-950/40 text-amber-300 border border-amber-500/60 shadow-sm' : 'text-[#a39e95]'}">
+        ⚙️ Event-Конструктор
       </button>
-      <button
-        onclick={() => { activeTab = 'handbook'; playClickSound(); }}
-        class="px-3.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all {activeTab === 'handbook' ? 'bg-[#282420] text-amber-300 border border-[#3d3831] shadow-sm' : 'text-[#a39e95]'}"
-      >
-        Стандарты СТО РЖД
-      </button>
-      <button
-        onclick={() => { activeTab = 'constructor'; playClickSound(); }}
-        class="px-3.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all {activeTab === 'constructor' ? 'bg-amber-950/40 text-amber-300 border border-amber-500/60 shadow-sm' : 'text-[#a39e95]'}"
-      >
-        ✍️ Конструктор инцидентов
+      <button onclick={() => { activeTab = 'handbook'; playClickSound(); }} class="px-3.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all {activeTab === 'handbook' ? 'bg-[#282420] text-amber-300 border border-[#3d3831] shadow-sm' : 'text-[#a39e95]'}">
+        База знаний
       </button>
     </div>
   </header>
 
-  {#if activeTab === 'cases'}
-    <div class="space-y-3">
-      <div class="p-4 rounded-xl bg-[#1a1816] border border-[#2d2924] flex flex-col gap-2">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-amber-400">Кейс № 28: Запрос личных медикаментов</span>
-          <span class="text-[10px] text-rose-400 font-mono font-semibold">Частая ошибка</span>
-        </div>
-        <p class="text-xs text-[#a39e95] leading-relaxed">
-          Проводник выдал пассажиру собственный обезболивающий препарат. Пассажир получил аллергическую реакцию.
-          <strong class="text-[#f5f3ef]">Правило:</strong> выдача личных лекарств категорически запрещена. Только аптечка первой помощи или вызов медика по громкой связи.
-        </p>
-      </div>
-
-      <div class="p-4 rounded-xl bg-[#1a1816] border border-[#2d2924] flex flex-col gap-2">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-amber-400">Кейс № 6: Неадекватный пассажир</span>
-          <span class="text-[10px] text-emerald-400 font-mono font-semibold">Стандарт безопасности</span>
-        </div>
-        <p class="text-xs text-[#a39e95] leading-relaxed">
-          При вызове начальника поезда по служебной радиосвязи запрещено произносить слово «пьяный», чтобы не спровоцировать пассажира на агрессию.
-        </p>
-      </div>
-    </div>
-  {:else if activeTab === 'handbook'}
-    <div class="p-5 rounded-2xl bg-[#1a1816] border border-[#2d2924] space-y-3 text-xs leading-relaxed text-[#a39e95]">
-      <h3 class="font-bold text-[#f5f3ef]">СТО РЖД 03.011–2026: Нормативы комфорта вагона 1-го класса</h3>
-      <ul class="list-disc pl-5 space-y-1">
-        <li>Температурный режим: 20–24°C при внешней температуре до 10°C; 24–28°C в жару.</li>
-        <li>Время ожидания обслуживания: в первом классе не более 5 минут, в бизнес-классе не более 10 минут.</li>
-        <li>За 15 минут до прибытия на конечную станцию завершаются все платные сервисы и торговля.</li>
-      </ul>
-    </div>
-  {:else if activeTab === 'constructor'}
-    <!-- Конструктор инцидентов для демонстрации жюри (Критерий 2) -->
-    <div class="p-5 rounded-2xl bg-[#1a1816] border border-[#2d2924] flex flex-col gap-5">
+  {#if activeTab === 'constructor'}
+    <div class="p-5 rounded-2xl bg-[#141210] border border-[#2d2924] flex flex-col gap-6 shadow-xl">
       <div class="flex items-center justify-between border-b border-[#2d2924] pb-3">
         <div>
-          <h2 class="text-sm font-bold text-[#f5f3ef] tracking-wide flex items-center gap-2">
-            <span>🛠️ Интерактивный No-Code редактор сценариев</span>
-            <span class="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono">ЖИВОЙ РЕЕСТР</span>
+          <h2 class="text-base font-bold text-amber-400 flex items-center gap-2">
+            <span>🎭 Настройка живого микро-сценария</span>
           </h2>
-          <p class="text-xs text-[#a39e95] mt-0.5">Создайте инцидент прямо сейчас без изменения кода ядра симулятора</p>
+          <p class="text-[11px] text-[#a39e95] mt-1">Определите параметры пассажира, триггер срабатывания и ИИ-поведение.</p>
         </div>
       </div>
 
       {#if successMessage}
-        <div class="p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-500/50 text-emerald-300 text-xs flex items-center gap-2.5">
-          <span class="text-base">✅</span>
-          <span>{successMessage}</span>
-        </div>
+        <div class="p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-500/50 text-emerald-300 text-xs flex items-center gap-2.5">✅ {successMessage}</div>
       {/if}
-
       {#if errorMessage}
-        <div class="p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/50 text-rose-300 text-xs flex items-center gap-2.5">
-          <span class="text-base">❌</span>
-          <span>{errorMessage}</span>
-        </div>
+        <div class="p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/50 text-rose-300 text-xs flex items-center gap-2.5">❌ {errorMessage}</div>
       {/if}
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <!-- Название и таймер -->
-        <div class="md:col-span-2 space-y-1.5">
-          <label for="scenario-title" class="text-xs text-[#a39e95] font-semibold">Название ситуации (Кратко)</label>
-          <input
-            id="scenario-title"
-            bind:value={customTitle}
-            type="text"
-            class="w-full px-3.5 py-2 rounded-xl bg-[#141210] border border-[#2d2924] focus:border-amber-400 text-xs text-[#f5f3ef] outline-none"
-            placeholder="Например: Пассажир уронил ноутбук в проход"
-          />
-        </div>
-
-        <div class="space-y-1.5">
-          <label for="scenario-timer" class="text-xs text-[#a39e95] font-semibold">Лимит времени (сек)</label>
-          <input
-            id="scenario-timer"
-            bind:value={customTimer}
-            type="number"
-            min="5"
-            max="60"
-            class="w-full px-3.5 py-2 rounded-xl bg-[#141210] border border-[#2d2924] focus:border-amber-400 text-xs text-[#f5f3ef] font-mono outline-none"
-          />
-        </div>
-
-        <!-- Реплика пассажира -->
-        <div class="md:col-span-3 space-y-1.5">
-          <label for="scenario-prompt" class="text-xs text-[#a39e95] font-semibold">Прямая речь пассажира (Текст Typewriter)</label>
-          <textarea
-            id="scenario-prompt"
-            bind:value={customPrompt}
-            rows="2"
-            class="w-full px-3.5 py-2 rounded-xl bg-[#141210] border border-[#2d2924] focus:border-amber-400 text-xs text-[#f5f3ef] outline-none"
-            placeholder="«Проводник, помогите...»"
-          ></textarea>
-        </div>
-      </div>
-
-      <!-- Варианты ответов -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-[#2d2924]">
-        <!-- Вариант 1 (Верный) -->
-        <div class="p-4 rounded-xl bg-[#141210] border border-emerald-900/40 space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-              <span>🟢</span> Вариант 1: Корректное действие
-            </span>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- БЛОК 1: КТО (Целевой пассажир) -->
+        <div class="p-4 rounded-xl bg-[#1a1816] border border-[#3d3831] space-y-3">
+          <h3 class="text-xs font-bold text-stone-300 uppercase tracking-wider mb-2 border-b border-[#2d2924] pb-1">1. Кто генерирует событие</h3>
+          
+          <div class="space-y-1.5">
+            <label class="text-[11px] text-[#a39e95]">Название события (для логов)</label>
+            <input bind:value={customTitle} type="text" class="w-full px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-white outline-none" />
           </div>
-          <div class="space-y-1">
-            <label for="opt1-text" class="text-[11px] text-[#a39e95]">Текст кнопки проводника</label>
-            <input
-              id="opt1-text"
-              bind:value={opt1Text}
-              type="text"
-              class="w-full px-3 py-1.5 rounded-lg bg-[#1a1816] border border-[#2d2924] text-xs text-[#f5f3ef] outline-none"
-            />
-          </div>
-          <div class="space-y-1">
-            <label for="opt1-feedback" class="text-[11px] text-[#a39e95]">Обоснование по СТО РЖД</label>
-            <input
-              id="opt1-feedback"
-              bind:value={opt1Feedback}
-              type="text"
-              class="w-full px-3 py-1.5 rounded-lg bg-[#1a1816] border border-[#2d2924] text-xs text-[#f5f3ef] outline-none"
-            />
-          </div>
-          <div class="grid grid-cols-2 gap-2 text-xs">
-            <div>
-              <label for="opt1-loyalty" class="text-[10px] text-[#a39e95]">Δ Лояльность</label>
-              <input id="opt1-loyalty" bind:value={opt1Loyalty} type="number" class="w-full px-2 py-1 rounded bg-[#1a1816] border border-[#2d2924] text-xs font-mono text-amber-300" />
-            </div>
-            <div>
-              <label for="opt1-safety" class="text-[10px] text-[#a39e95]">Δ Безопасность</label>
-              <input id="opt1-safety" bind:value={opt1Safety} type="number" class="w-full px-2 py-1 rounded bg-[#1a1816] border border-[#2d2924] text-xs font-mono text-emerald-300" />
-            </div>
+
+          <div class="space-y-1.5">
+            <label class="text-[11px] text-[#a39e95]">Тип пассажира (Archetype)</label>
+            <select bind:value={targetArchetype} class="w-full px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-white outline-none">
+              <option value="any">🎲 Любой случайный пассажир</option>
+              <option value="male_young">👨 Молодой мужчина</option>
+              <option value="female_young">👩 Молодая девушка</option>
+              <option value="female_elderly">👵 Пожилая женщина</option>
+            </select>
           </div>
         </div>
 
-        <!-- Вариант 2 (Ошибочный) -->
-        <div class="p-4 rounded-xl bg-[#141210] border border-rose-900/40 space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-rose-400 flex items-center gap-1.5">
-              <span>🔴</span> Вариант 2: Ошибочное действие
-            </span>
-          </div>
-          <div class="space-y-1">
-            <label for="opt2-text" class="text-[11px] text-[#a39e95]">Текст кнопки проводника</label>
-            <input
-              id="opt2-text"
-              bind:value={opt2Text}
-              type="text"
-              class="w-full px-3 py-1.5 rounded-lg bg-[#1a1816] border border-[#2d2924] text-xs text-[#f5f3ef] outline-none"
-            />
-          </div>
-          <div class="space-y-1">
-            <label for="opt2-feedback" class="text-[11px] text-[#a39e95]">Разбор ошибки</label>
-            <input
-              id="opt2-feedback"
-              bind:value={opt2Feedback}
-              type="text"
-              class="w-full px-3 py-1.5 rounded-lg bg-[#1a1816] border border-[#2d2924] text-xs text-[#f5f3ef] outline-none"
-            />
-          </div>
-          <div class="grid grid-cols-2 gap-2 text-xs">
-            <div>
-              <label for="opt2-loyalty" class="text-[10px] text-[#a39e95]">Δ Лояльность</label>
-              <input id="opt2-loyalty" bind:value={opt2Loyalty} type="number" class="w-full px-2 py-1 rounded bg-[#1a1816] border border-[#2d2924] text-xs font-mono text-rose-300" />
+        <!-- БЛОК 2: КОГДА (Триггер) -->
+        <div class="p-4 rounded-xl bg-[#1a1816] border border-[#3d3831] space-y-3">
+          <h3 class="text-xs font-bold text-stone-300 uppercase tracking-wider mb-2 border-b border-[#2d2924] pb-1">2. Когда сработает (Триггер)</h3>
+          
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-1.5">
+              <label class="text-[11px] text-[#a39e95]">Условие</label>
+              <select bind:value={triggerType} class="w-full px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-white outline-none">
+                <option value="time">⏱ По таймеру (сек)</option>
+                <option value="speed">🚄 По скорости (км/ч)</option>
+              </select>
             </div>
-            <div>
-              <label for="opt2-safety" class="text-[10px] text-[#a39e95]">Δ Безопасность</label>
-              <input id="opt2-safety" bind:value={opt2Safety} type="number" class="w-full px-2 py-1 rounded bg-[#1a1816] border border-[#2d2924] text-xs font-mono text-rose-300" />
+            <div class="space-y-1.5">
+              <label class="text-[11px] text-[#a39e95]">Значение триггера</label>
+              <input bind:value={triggerValue} type="number" class="w-full px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs font-mono text-amber-300 outline-none" />
             </div>
+          </div>
+
+          <div class="flex items-center gap-2 mt-4">
+            <input type="checkbox" id="is-passive" bind:checked={isPassive} class="w-4 h-4 accent-amber-500 cursor-pointer" />
+            <label for="is-passive" class="text-xs text-[#a39e95] cursor-pointer">
+              <strong class="text-white">Скрытое событие</strong> (Не зажигать лампочку вызова. Проводник должен заметить сам).
+            </label>
+          </div>
+        </div>
+
+        <!-- БЛОК 3: ИИ-ПОВЕДЕНИЕ -->
+        <div class="md:col-span-2 p-4 rounded-xl bg-gradient-to-br from-[#1a1816] to-[#12110f] border border-amber-900/30 space-y-4">
+          <h3 class="text-xs font-bold text-amber-400 uppercase tracking-wider border-b border-amber-900/30 pb-1 flex items-center gap-2">
+            <span>🧠 3. Инструкция для LLM (Prompt Engineering)</span>
+          </h3>
+
+          <div class="space-y-1.5">
+            <label class="text-[11px] text-[#a39e95]">Внешнее состояние (Визуализация в салоне)</label>
+            <select bind:value={passengerState} class="w-full px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-white outline-none max-w-xs">
+              <option value="vaping">💨 Курит Вейп (vaping)</option>
+              <option value="crying_child">😭 Плач ребенка (crying)</option>
+              <option value="drunk">🍺 Нетрезвый (drunk)</option>
+              <option value="sleeping">💤 Спит (sleeping)</option>
+              <option value="annoyed">😤 Недоволен (annoyed)</option>
+            </select>
+          </div>
+          
+          <div class="space-y-1.5">
+            <label class="text-[11px] text-[#a39e95]">System Prompt: Что ИИ должен отыгрывать (Роль и характер)</label>
+            <textarea bind:value={llmSystemPrompt} rows="3" class="w-full px-3.5 py-2.5 rounded-xl bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-emerald-300 italic outline-none leading-relaxed"></textarea>
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="text-[11px] text-[#a39e95]">Критерий успеха: Что ожидается от проводника (Для оценки)</label>
+            <textarea bind:value={expectedRule} rows="2" class="w-full px-3.5 py-2.5 rounded-xl bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-amber-300 outline-none leading-relaxed"></textarea>
           </div>
         </div>
       </div>
 
       <div class="flex justify-end pt-3 border-t border-[#2d2924]">
-        <button
-          onclick={handleSaveScenario}
-          disabled={isSaving}
-          class="px-6 py-3 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-500 hover:from-amber-500 text-stone-950 font-bold text-xs sm:text-sm tracking-wide shadow-lg shadow-amber-500/20 cursor-pointer transition-all flex items-center gap-2"
-        >
-          <span>{isSaving ? '⏳ Сохранение...' : '🚀 Сохранить в реестр ВСМ'}</span>
+        <button onclick={handleSaveScenario} disabled={isSaving} class="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 text-white font-bold text-xs sm:text-sm tracking-wide shadow-lg shadow-emerald-500/20 cursor-pointer transition-all flex items-center gap-2">
+          <span>{isSaving ? '⏳ Инъекция в БД...' : '🚀 Активировать событие'}</span>
         </button>
       </div>
+    </div>
+
+  {:else}
+    <!-- Заглушка базы знаний -->
+    <div class="p-5 rounded-2xl bg-[#1a1816] border border-[#2d2924] text-xs text-[#a39e95]">
+      База знаний стандартов в режиме разработки.
     </div>
   {/if}
 </div>
