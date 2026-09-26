@@ -271,6 +271,44 @@ export class TrainAudioStore {
       this.isPassengerSpeaking = false;
     }
   }
+
+  // --- Эмбиент инцидентов (плач, шипение вейпа, игра) ---
+  private currentEventAmbient: HTMLAudioElement | null = null;
+  private currentEventFile: string | null = null;
+
+  public playEventAmbient(filename: string, volume: number = 0.2): void {
+    if (this.isAudioMuted) return;
+    if (this.currentEventFile === filename && this.currentEventAmbient) return;
+
+    this.stopEventAmbient();
+
+    try {
+      this.currentEventAmbient = new Audio(`/storage/audio/ambient/${filename}`);
+      this.currentEventAmbient.loop = true;
+      this.currentEventAmbient.volume = volume;
+      this.currentEventFile = filename;
+      this.currentEventAmbient.play().catch(() => {
+        // Фоллбэк: если файл лежит прямо в /storage/audio/
+        try {
+          this.currentEventAmbient = new Audio(`/storage/audio/${filename}`);
+          this.currentEventAmbient.loop = true;
+          this.currentEventAmbient.volume = volume;
+          this.currentEventAmbient.play().catch(() => { this.currentEventAmbient = null; });
+        } catch {
+          this.currentEventAmbient = null;
+        }
+      });
+    } catch {}
+  }
+
+  public stopEventAmbient(): void {
+    if (this.currentEventAmbient) {
+      this.currentEventAmbient.pause();
+      this.currentEventAmbient.currentTime = 0;
+      this.currentEventAmbient = null;
+    }
+    this.currentEventFile = null;
+  }
 }
 
 export const trainAudio = new TrainAudioStore();

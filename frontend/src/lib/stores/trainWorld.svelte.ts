@@ -314,6 +314,19 @@ export class TrainWorldStore {
     physicsState.advanceTimeAndSpeed(deltaSec);
     const t = this.timeSeconds;
 
+    // --- ПРОВЕРКА СКРЫТЫХ ЗВУКОВЫХ СОБЫТИЙ (Эмбиент в салоне) ---
+    const cryingSeat = this.seats.find(s => s.passenger?.state === 'crying_child');
+    if (cryingSeat) {
+      trainAudio.playEventAmbient('crying_child.mp3', 0.25);
+    } else {
+      const vapingSeat = this.seats.find(s => s.passenger?.state === 'vaping');
+      if (vapingSeat) {
+        trainAudio.playEventAmbient('vape_hiss.mp3', 0.15);
+      } else {
+        trainAudio.stopEventAmbient();
+      }
+    }
+
     if (t >= DEPARTURE_SECONDS + 12 && !this.hasPlayedWelcome) {
       this.hasPlayedWelcome = true;
       trainAudio.playVoiceAnnouncement('welcome_msc.wav');

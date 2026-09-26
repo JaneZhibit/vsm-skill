@@ -137,15 +137,9 @@
           {#if seat.isOccupied}
             {#if seat.activeIncident != null}
               {#if typeof seat.activeIncident === 'object' && seat.activeIncident.phase === 'passive'}
-                {#if seat.condition === 'drunk' || seat.activeIncident.incident_id.includes('drunk')}
-                  <span class="beacon-call text-amber-500">🍺</span>
-                {:else if seat.condition === 'sleeping'}
-                  <span class="beacon-call text-indigo-400">💤</span>
-                {:else}
-                  <span class="beacon-call text-amber-400">🍺</span>
-                {/if}
+                <span class="beacon-observe animate-pulse opacity-60 text-stone-300" title="Что-то происходит">👁️</span>
               {:else}
-                <span class="beacon-call animate-bounce">🔔</span>
+                <span class="beacon-call animate-bounce text-rose-500">🔔</span>
               {/if}
             {:else if seat.condition === 'annoyed'}
               <span class="beacon-call">🔔</span>
@@ -851,5 +845,10 @@
     background: linear-gradient(135deg, #fbbf24, #f59e0b);
     transform: translateY(-1px);
     box-shadow: 0 6px 16px rgba(245, 158, 11, 0.35);
+  }
+
+  .beacon-observe {
+    font-size: 0.85rem;
+    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.3));
   }
 </style>

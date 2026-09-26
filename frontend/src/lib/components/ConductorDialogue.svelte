@@ -319,7 +319,7 @@
           const audio = new Audio(`data:audio/mp3;base64,${feedbackResult.passenger_audio_base64}`);
           audio.volume = 0.9;
           audio.play().catch(e => console.warn("Audio autoplay blocked", e));
-        }, 500);
+        }, 50);
       }
 
     } catch (e) {

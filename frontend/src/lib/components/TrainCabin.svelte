@@ -318,7 +318,7 @@
           </button>
         {/if}
 
-        <!-- Пассивные пассажиры в проходе (нетрезвый 🍺, спящий 💤) -->
+        <!-- Пассивные пассажиры в проходе (скрытый 👁️, нетрезвый 🍺, спящий 💤) -->
         {#each trainWorld.seats.filter(s => s.isOccupied && ((s.activeIncident && typeof s.activeIncident === 'object' && s.activeIncident.phase === 'passive') || s.condition === 'drunk' || s.condition === 'sleeping')) as passiveSeat}
           {#if !callingSeat || callingSeat.id !== passiveSeat.id}
             {@const ppos = getSeatCoords(passiveSeat.id)}
@@ -328,7 +328,15 @@
               style="top: {ppos.top}; left: {ppos.left}; transform: translate(-50%, -50%) scale({ppos.scale * 0.85});"
               title="Подойти к месту {passiveSeat.id}"
             >
-              <span>{passiveSeat.condition === 'drunk' ? '🍺' : '💤'} Место {passiveSeat.id}</span>
+              <span>
+                {#if passiveSeat.activeIncident && typeof passiveSeat.activeIncident === 'object' && passiveSeat.activeIncident.phase === 'passive'}
+                  👁️ Место {passiveSeat.id}
+                {:else if passiveSeat.condition === 'drunk'}
+                  🍺 Место {passiveSeat.id}
+                {:else}
+                  💤 Место {passiveSeat.id}
+                {/if}
+              </span>
             </button>
           {/if}
         {/each}

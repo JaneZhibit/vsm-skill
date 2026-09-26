@@ -227,50 +227,31 @@ async def resolve_voice_incident(
 
     engine = trip_manager.get_trip(user["id"])
     incident_meta = SCENARIOS_DB.get(payload.incident_id, {})
-    ai_persona = incident_meta.get("ai_persona", "Ты обычный пассажир поезда.")
+    ai_persona = incident_meta.get("ai_persona", "")
 
-    # Добавляем контекст архетипа пассажира для LLM
+    # 1. Извлекаем полный профиль текущего пассажира
     active_seat = next((s for s in engine.passenger_manager.seats if s.active_incident), None)
-    if active_seat and active_seat.passenger:
-        arch = active_seat.passenger.archetype_id
-        trait = active_seat.passenger.trait
-        trait_desc = {"polite": "вежливая", "demanding": "требовательная", "anxious": "тревожная"} if "female" in arch else {"polite": "вежливый", "demanding": "требовательный", "anxious": "тревожный"}
-        t_desc = trait_desc.get(trait, "")
+    passenger_profile = active_seat.passenger.model_dump() if (active_seat and active_seat.passenger) else {}
 
-        if arch == "male_young":
-            ai_persona += f" Твоя роль: Молодой парень. Характер: {t_desc}."
-        elif arch == "female_young":
-            ai_persona += f" Твоя роль: Молодая девушка. Характер: {t_desc}."
-        elif arch == "female_elderly":
-            ai_persona += f" Твоя роль: Пожилая женщина. Характер: {t_desc}."
-
-    # 1. Получаем текстовый ответ от LLM
+    # 2. Быстрый вызов LLM (json_schema) с мега-промптом
     eval_result = await polza_ai.evaluate_conductor_voice_response(
         incident_title=incident_meta.get("title", payload.incident_id),
         passenger_prompt=payload.passenger_prompt,
         conductor_text=conductor_speech,
         expected_rule=payload.expected_rule or "СТО РЖД 03.011",
-        ai_persona=ai_persona,
-        conductor_gender=user.get("gender", "m")
+        passenger_profile=passenger_profile,
+        conductor_gender=user.get("gender", "m"),
+        ai_persona=ai_persona
     )
     eval_result = engine.game_master.apply_lesson_protection(eval_result)
 
-    # 2. Ищем пассажира, чтобы понять его АРХЕТИП для голоса TTS
-    passenger_voice = "Leda"  # Девушка по умолчанию
-    if active_seat and active_seat.passenger:
-        arch = active_seat.passenger.archetype_id
-        if arch == "male_young":
-            passenger_voice = "Puck"
-        elif arch == "female_elderly":
-            passenger_voice = "Sulafat"
-        else:
-            passenger_voice = "Leda"
-
-    # 3. Синтезируем аудио ответа пассажира
+    # 3. Синтезируем аудио ответа пассажира с динамическим голосом и темпом
     passenger_reply_text = eval_result.get("passenger_reply", "")
     passenger_audio_b64 = None
     if passenger_reply_text:
-        passenger_audio_b64 = await polza_ai.generate_speech_base64(passenger_reply_text, voice=passenger_voice)
+        archetype = passenger_profile.get("archetype_id", "female_young")
+        trait = passenger_profile.get("trait", "polite")
+        passenger_audio_b64 = await polza_ai.generate_speech_base64(passenger_reply_text, archetype, trait)
 
     # Эффект бабочки
     if "butterfly_effect" in eval_result:
