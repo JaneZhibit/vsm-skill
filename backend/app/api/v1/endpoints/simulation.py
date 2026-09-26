@@ -1,4 +1,4 @@
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List, Literal
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from pydantic import BaseModel
 
@@ -84,7 +84,7 @@ async def sync_trip_state(payload: TripStatePayload, user: Dict[str, Any] = Depe
     engine = trip_manager.get_trip(user["id"])
     engine.speed = payload.speed
     engine.shift_phase = payload.shift_phase
-    events = engine.process_tick(payload.time_seconds)
+    events = engine.process_tick(payload.time_seconds, payload.speed)
     return {
         "status": "synced",
         "events": events,
@@ -146,8 +146,10 @@ async def resolve_simulation_incident(payload: ResolveIncidentRequest, user: Dic
 
 
 class LiveScenarioTrigger(BaseModel):
-    type: str  # "time", "speed", "station"
-    value: int # Например, 15 (секунд после старта) или 250 (км/ч)
+    type: Literal["time", "speed", "random", "chained"]
+    value: Optional[int] = None          # Секунды (time) или км/ч (speed) или шанс % (random)
+    parent_id: Optional[str] = None      # ID родительского инцидента (для chained)
+    delay_sec: Optional[int] = None      # Задержка в секундах после начала родительского (chained)
 
 class CustomLiveScenarioPayload(BaseModel):
     incident_id: Optional[str] = None
@@ -158,6 +160,7 @@ class CustomLiveScenarioPayload(BaseModel):
     is_passive: bool       # Если True - нет красного колокольчика, просто меняется стейт
     llm_system_prompt: str # Что ИИ должен отыгрывать (напр. "Ты куришь вейп...")
     expected_rule: str     # Что должен сказать проводник (для оценки LLM)
+    skills: List[str] = [] # ["safety", "service", "discipline", "medicine"]
 
 # Глобальный реестр пользовательских живых сценариев
 LIVE_SCENARIOS_DB = {}
@@ -177,6 +180,7 @@ async def create_live_scenario(payload: CustomLiveScenarioPayload):
         "passenger_state_during": payload.passenger_state,
         "ai_persona": payload.llm_system_prompt,
         "start_step": "step_1",
+        "skills": payload.skills,
         "steps": {
             "step_1": {
                 "prompt": payload.llm_system_prompt,

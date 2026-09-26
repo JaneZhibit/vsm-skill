@@ -6,11 +6,13 @@ from app.services.lessons import LESSONS_DB
 
 class GameMaster:
     """Оркестратор событий и инцидентов (State Machine).
-    Обрабатывает тики времени, эмерджентные триггеры и динамические состояния пассажиров."""
+    Обрабатывает тики времени, эмерджентные триггеры, цепные реакции и динамические состояния пассажиров."""
 
     def __init__(self):
         self.current_mode = "pro"
         self.active_triggers: List[Dict[str, Any]] = []
+        # Словарь для отслеживания запущенных событий: { "incident_id": время_старта_сек }
+        self.running_incidents: Dict[str, float] = {}
         self.crying_start_time: Optional[float] = None
         self.crying_seat_id: Optional[str] = None
         self.neighbor_complained: bool = False
@@ -18,6 +20,7 @@ class GameMaster:
 
     def init_triggers(self, mode: str = "pro", start_time: float = 50400.0) -> None:
         self.current_mode = mode
+        self.running_incidents = {}
         self.crying_start_time = None
         self.crying_seat_id = None
         self.neighbor_complained = False
@@ -26,49 +29,84 @@ class GameMaster:
         if mode.startswith("lesson_"):
             return
 
-        # 1. Подгружаем все созданные в Студии "Живые сценарии"
+        # 1. Загружаем пользовательские живые сценарии из LIVE_SCENARIOS_DB
         try:
             from app.api.v1.endpoints.simulation import LIVE_SCENARIOS_DB
             for inc_id, sc in LIVE_SCENARIOS_DB.items():
-                trigger_time = start_time + sc["trigger"]["value"] if sc.get("trigger", {}).get("type") == "time" else start_time + 60
                 self.active_triggers.append({
                     "id": inc_id,
-                    "time_trigger": trigger_time,
                     "action": "custom_live_event",
                     "payload": sc
                 })
         except Exception as e:
             print(f"Error loading LIVE_SCENARIOS_DB: {e}")
 
-        # 2. Базовые встроенные триггеры
+        # 2. Базовые встроенные триггеры (по времени и цепочке)
         self.active_triggers.extend([
             {
                 "id": "trig_drunk",
                 "incident_id": "live_drunk",
-                "time_trigger": start_time + 100,
                 "action": "builtin",
                 "phase": "passive",
+                "payload": {
+                    "incident_id": "live_drunk",
+                    "trigger": {"type": "time", "value": 100},
+                    "target_archetype": "male_young",
+                    "passenger_state": "drunk",
+                    "is_passive": True
+                }
             },
             {
                 "id": "trig_crying",
                 "incident_id": "live_crying_child",
-                "time_trigger": start_time + 360,
                 "action": "builtin",
                 "phase": "ambient",
+                "payload": {
+                    "incident_id": "live_crying_child",
+                    "trigger": {"type": "time", "value": 360},
+                    "target_archetype": "female_young",
+                    "passenger_state": "annoyed",
+                    "is_passive": False
+                }
+            },
+            {
+                "id": "trig_neighbor_complaint",
+                "incident_id": "live_neighbor_complaint",
+                "action": "builtin",
+                "phase": "urgent",
+                "payload": {
+                    "incident_id": "live_neighbor_complaint",
+                    "trigger": {"type": "chained", "parent_id": "live_crying_child", "delay_sec": 60},
+                    "target_archetype": "any",
+                    "passenger_state": "annoyed",
+                    "is_passive": False
+                }
             },
             {
                 "id": "trig_tea",
                 "incident_id": "live_spilled_tea",
-                "time_trigger": start_time + 1080,
                 "action": "builtin",
                 "phase": "urgent",
+                "payload": {
+                    "incident_id": "live_spilled_tea",
+                    "trigger": {"type": "time", "value": 1080},
+                    "target_archetype": "any",
+                    "passenger_state": "annoyed",
+                    "is_passive": False
+                }
             },
             {
                 "id": "trig_vaper",
                 "incident_id": "live_vaper",
-                "time_trigger": start_time + 1920,
                 "action": "builtin",
                 "phase": "urgent",
+                "payload": {
+                    "incident_id": "live_vaper",
+                    "trigger": {"type": "time", "value": 1920},
+                    "target_archetype": "male_young",
+                    "passenger_state": "annoyed",
+                    "is_passive": False
+                }
             },
         ])
 
@@ -111,12 +149,12 @@ class GameMaster:
                 self.active_triggers = []
                 return {"timeline": timeline, "start_time": start_time_sec, "start_phase": start_phase}
 
-        # РЕЖИМ: PRO. Начинаем с Москвы (14:00 -> 50400 сек)
+        # РЕЖИМ: PRO или level_*. Начинаем с Москвы (14:00 -> 50400 сек)
         start_time_sec = 50400
         start_phase = "initial_round"
         self.init_triggers(mode=mode, start_time=start_time_sec)
 
-        # Формируем контрольные точки для таймлайна
+        # Контрольные точки для таймлайна (требуются для расписания поездки и тестов)
         pool = list(SCENARIOS_DB.keys())
         random.shuffle(pool)
         selected_incidents = pool[:4]
@@ -133,57 +171,74 @@ class GameMaster:
 
         return {"timeline": timeline, "start_time": start_time_sec, "start_phase": start_phase}
 
-    def process_tick(self, current_time: float, seats: List[SeatInfo]) -> List[Dict]:
+    def process_tick(self, current_time: float, current_speed: Any = 250.0, seats: Optional[List[SeatInfo]] = None) -> List[Dict]:
+        """Умный тик, обрабатывающий время, скорость, рандом и цепные реакции."""
+        if isinstance(current_speed, list):
+            seats = current_speed
+            current_speed = 250.0
+        elif seats is None:
+            seats = []
+
+        # Сначала очищаем running_incidents от тех, которые уже решили
+        active_ids_in_cabin = [
+            s.active_incident.incident_id if not isinstance(s.active_incident, dict) else s.active_incident["incident_id"]
+            for s in seats if s.active_incident
+        ]
+        keys_to_remove = [k for k in list(self.running_incidents.keys()) if k not in active_ids_in_cabin]
+        for k in keys_to_remove:
+            del self.running_incidents[k]
+
         events_to_fire = []
         remaining = []
+        start_time_base = 50400  # 14:00 (Москва)
+
         for trigger in self.active_triggers:
-            trig_time = trigger.get("time_trigger", trigger.get("time_sec", 0))
-            if current_time >= trig_time:
+            sc = trigger.get("payload", {})
+            trig_info = sc.get("trigger", {})
+            t_type = trig_info.get("type", "time")
+            val = trig_info.get("value")
+            should_fire = False
+
+            if t_type == "time":
+                req_time = start_time_base + (val if val is not None else 0)
+                if current_time >= req_time:
+                    should_fire = True
+
+            elif t_type == "speed":
+                req_speed = val if val is not None else 999
+                if float(current_speed) >= req_speed:
+                    should_fire = True
+
+            elif t_type == "random":
+                # Например, value = 5 (5% шанс каждую секунду, когда скорость > 100)
+                chance_pct = val if val is not None else 1
+                if float(current_speed) > 100 and random.randint(1, 1000) <= (chance_pct * 10):
+                    should_fire = True
+
+            elif t_type == "chained":
+                parent_id = trig_info.get("parent_id")
+                delay = trig_info.get("delay_sec", 0) or 0
+                # Если родительский инцидент сейчас активен и прошло нужное время
+                if parent_id in self.running_incidents:
+                    if current_time - self.running_incidents[parent_id] >= delay:
+                        should_fire = True
+
+            if should_fire:
                 events_to_fire.append(trigger)
+                inc_id = sc.get("incident_id", trigger.get("incident_id", trigger.get("id")))
                 if trigger.get("action") == "custom_live_event":
-                    self._execute_live_scenario(trigger["payload"], seats)
-                else:
+                    self._execute_live_scenario(sc, seats)
+                elif trigger.get("action") == "builtin":
                     self._execute_builtin_trigger(trigger, current_time, seats)
+                else:
+                    self._execute_live_scenario(sc, seats)
+
+                if inc_id:
+                    self.running_incidents[inc_id] = current_time
             else:
                 remaining.append(trigger)
+
         self.active_triggers = remaining
-
-        # Проверяем таймаут детского плача: жалоба соседа через 60 секунд!
-        if self.crying_start_time and not self.neighbor_complained:
-            crying_seat = next((s for s in seats if s.seat_id == self.crying_seat_id), None)
-            has_crying = False
-            if crying_seat and crying_seat.active_incident:
-                c_inc = getattr(crying_seat.active_incident, "incident_id", None)
-                if c_inc == "live_crying_child":
-                    has_crying = True
-
-            if has_crying:
-                if current_time - self.crying_start_time >= 60:
-                    occupied = [s for s in seats if s.is_occupied and s.passenger]
-                    neighbor_candidates = [
-                        s for s in occupied 
-                        if s.seat_id != self.crying_seat_id and not s.active_incident and abs(s.row - crying_seat.row) <= 1
-                    ]
-                    if not neighbor_candidates:
-                        neighbor_candidates = [s for s in occupied if s.seat_id != self.crying_seat_id and not s.active_incident]
-
-                    if neighbor_candidates:
-                        neighbor_seat = random.choice(neighbor_candidates)
-                        inc_data = get_frontend_incident_data("live_neighbor_complaint")
-                        if inc_data:
-                            neighbor_seat.active_incident = ActiveIncidentSchema(**inc_data)
-                            neighbor_seat.passenger.state = "annoyed"
-                            neighbor_seat.passenger.sprite_url = f"/assets/passengers/{neighbor_seat.passenger.archetype_id}/annoyed.png"
-                            self.neighbor_complained = True
-                            events_to_fire.append({
-                                "type": "incident_spawned",
-                                "incident_id": "live_neighbor_complaint",
-                                "seat_id": neighbor_seat.seat_id,
-                                "phase": "urgent",
-                            })
-            else:
-                self.crying_start_time = None
-
         return events_to_fire
 
     def _execute_live_scenario(self, scenario: dict, seats: List[SeatInfo]):
@@ -196,9 +251,11 @@ class GameMaster:
         valid_seats = occupied if target_arch == "any" else [s for s in occupied if s.passenger.archetype_id == target_arch]
         
         if not valid_seats:
-            valid_seats = occupied # Фолбэк, если нужного типа нет
+            valid_seats = occupied  # Фолбэк, если нужного типа нет
             
-        seat = random.choice(valid_seats)
+        # Предпочитаем место без активного инцидента
+        free_seats = [s for s in valid_seats if not s.active_incident]
+        seat = random.choice(free_seats if free_seats else valid_seats)
         
         # Применяем состояние
         new_state = scenario.get("passenger_state", "annoyed")
@@ -212,13 +269,13 @@ class GameMaster:
 
         seat.active_incident = ActiveIncidentSchema(
             incident_id=scenario["incident_id"],
-            title=scenario["title"],
+            title=scenario.get("title", "Живое событие"),
             phase=phase_str,
             start_step="step_1",
             steps={
                 "step_1": ScenarioStepSchema(
-                    prompt=scenario["llm_system_prompt"],
-                    expected_rule=scenario["expected_rule"],
+                    prompt=scenario.get("llm_system_prompt", ""),
+                    expected_rule=scenario.get("expected_rule", ""),
                     phase=phase_str,
                     options=[]
                 )
@@ -241,6 +298,16 @@ class GameMaster:
             target_seat = next((s for s in candidates if s.passenger.archetype_id == "female_young"), random.choice(candidates))
         elif inc_id == "live_drunk":
             target_seat = next((s for s in candidates if s.passenger.archetype_id == "male_young"), random.choice(candidates))
+        elif inc_id == "live_neighbor_complaint":
+            crying_seat = next((s for s in seats if s.seat_id == self.crying_seat_id), None)
+            if crying_seat:
+                neighbor_candidates = [
+                    s for s in occupied 
+                    if s.seat_id != self.crying_seat_id and not s.active_incident and abs(s.row - crying_seat.row) <= 1
+                ]
+                target_seat = random.choice(neighbor_candidates) if neighbor_candidates else random.choice(candidates)
+            else:
+                target_seat = random.choice(candidates)
         else:
             target_seat = random.choice(candidates)
 

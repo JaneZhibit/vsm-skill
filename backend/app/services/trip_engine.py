@@ -60,9 +60,10 @@ class TripEngine:
         self.game_master.spawn_incident(self.passenger_manager.seats, force_incident)
         return self.get_manifest()
 
-    def process_tick(self, current_time: float) -> list:
+    def process_tick(self, current_time: float, current_speed: Optional[float] = None) -> list:
         self.time_seconds = current_time
-        return self.game_master.process_tick(current_time, self.passenger_manager.seats)
+        speed = current_speed if current_speed is not None else getattr(self, "speed", 250.0)
+        return self.game_master.process_tick(current_time, speed, self.passenger_manager.seats)
 
     def process_station_arrival(self, station_index: int) -> StationEventResponse:
         return self.passenger_manager.process_station(station_index)
