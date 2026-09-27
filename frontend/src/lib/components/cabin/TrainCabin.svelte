@@ -47,13 +47,10 @@
 
   // --- БЛОКИРОВКА КНОПКИ "НАЗАД" НА ANDROID ---
   onMount(() => {
-    // Создаем "ложное" состояние истории
     window.history.pushState({ simulatorLocked: true }, '', window.location.href);
 
     const handlePopState = (e: PopStateEvent) => {
-      // Пользователь нажал "Назад". Возвращаем ложное состояние обратно
       window.history.pushState({ simulatorLocked: true }, '', window.location.href);
-      // Открываем меню паузы вместо выхода из приложения
       if (!isSettingsOpen && !isSeatMapOpen) {
         playClickSound();
         isSettingsOpen = true;
@@ -125,6 +122,9 @@
   });
 
   function handleWindowResize() { centerScroll(false); }
+
+  function panLeft() { if(scrollAreaEl) scrollAreaEl.scrollBy({left: -250, behavior: 'smooth'}); }
+  function panRight() { if(scrollAreaEl) scrollAreaEl.scrollBy({left: 250, behavior: 'smooth'}); }
 </script>
 
 <svelte:window onresize={handleWindowResize} />
@@ -174,21 +174,22 @@
             <span class="trigger-alert-badge"><span class="trigger-alert-ping"></span>{cabinState.alertSeatsCount}</span>
           {/if}
         </button>
-        <!-- КНОПКА МЕНЮ ПАУЗЫ -->
         <button onclick={() => { playClickSound(); isSettingsOpen = true; }} class="seat-map-trigger-btn !px-3" title="Меню">
           <span class="trigger-icon text-base">⚙️</span>
         </button>
       </div>
     {:else}
       <div class="seat-top-bar">
-        <div class="seat-stepper-mini">
-          <button onclick={handlePrevSeat} class="stepper-mini-btn">◀ Пред</button>
-          <button onclick={handleOpenSeatMap} class="stepper-mini-seat">💺 Место {selectedSeat?.id || '—'}</button>
-          <button onclick={handleNextSeat} class="stepper-mini-btn">След ▶</button>
-        </div>
+        <!-- Оставим только кнопки здесь, т.к. "В проход" теперь внутри диалога -->
       </div>
     {/if}
   </div>
+
+  <!-- КНОПКИ ПАНОРАМИРОВАНИЯ ДЛЯ МОБИЛЬНЫХ УСТРОЙСТВ -->
+  {#if cabinState.currentView === 'aisle'}
+    <button onclick={panLeft} class="md:hidden pan-arrow left-arrow" aria-label="Влево">❮</button>
+    <button onclick={panRight} class="md:hidden pan-arrow right-arrow" aria-label="Вправо">❯</button>
+  {/if}
 
   <div class="scene-scroll-area hide-scrollbar" bind:this={scrollAreaEl}>
     {#if cabinState.currentView === 'aisle'}
@@ -277,15 +278,14 @@
           {/if}
         </div>
 
-        <!-- Сворачиваемая инфо-панель -->
         {#if !isTripFinished && conductorState.shiftPhase !== 'arrival'}
           <div class="pointer-events-auto w-full max-w-sm mx-auto flex flex-col items-center mt-1 px-3 md:px-0">
             <button onclick={() => {playClickSound(); isInfoCollapsed = !isInfoCollapsed;}} class="bg-[#141210]/95 border border-b-0 border-[#3d3831] rounded-t-xl px-6 py-1.5 flex items-center justify-center cursor-pointer shadow-md hover:bg-[#1a1816] transition-colors relative z-20">
               <span class="text-[10px] text-stone-400 font-bold uppercase tracking-widest">{isInfoCollapsed ? '▲ Маршрут' : '▼ Скрыть'}</span>
             </button>
 
-            <!-- Обертка для анимации высоты через CSS -->
-            <div class="w-full bg-[#141210]/95 backdrop-blur-md border border-[#3d3831] rounded-xl rounded-t-none shadow-2xl flex flex-col relative z-10 transition-all duration-300 ease-in-out origin-top overflow-hidden {isInfoCollapsed ? 'max-h-0 opacity-0 border-none' : 'max-h-[100px] opacity-100 p-2.5 sm:p-3 border-t-0'}">
+            <!-- Плавное сворачивание через CSS max-height -->
+            <div class="w-full bg-[#141210]/95 backdrop-blur-md border border-[#3d3831] rounded-xl rounded-t-none shadow-2xl flex flex-col relative z-10 transition-all duration-300 ease-in-out overflow-hidden {isInfoCollapsed ? 'max-h-0 opacity-0 border-none' : 'max-h-[100px] opacity-100 p-2.5 sm:p-3 border-t-0'}">
               <div class="flex justify-between items-center text-[10px] font-mono text-[#a39e95] uppercase font-semibold">
                 <span class="text-amber-400 bg-[#282420] px-1.5 py-0.5 rounded border border-[#3d3831]">🕒 {physicsState.formattedTime}</span>
                 <div class="text-center flex flex-col items-center leading-tight">
@@ -303,7 +303,7 @@
       </div>
     {/if}
   {:else}
-    <div class="dialogue-wrapper pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+    <div class="dialogue-wrapper">
       <ConductorDialogue />
     </div>
   {/if}
@@ -359,18 +359,30 @@
   .cabin-viewport { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden; background-color: #0f0e0d; }
   @media (min-width: 768px) { .cabin-viewport { display: flex; flex-direction: row; align-items: center; justify-content: center; padding: 0.5rem; } }
 
-  .hud-top-bar { position: absolute; top: 0.75rem; left: 0.75rem; right: 0.75rem; z-index: 35; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
+  .hud-top-bar { position: absolute; top: max(0.75rem, env(safe-area-inset-top)); left: 0.75rem; right: 0.75rem; z-index: 35; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
   .hud-top-bar > * { pointer-events: auto; }
   @media (min-width: 768px) { .hud-top-bar { top: 1.25rem; left: 1.5rem; right: 1.5rem; max-width: 96vw; margin: 0 auto; } }
 
-  .scene-scroll-area { flex: 1 1 0%; min-height: 0; width: 100%; position: relative; display: flex; align-items: center; justify-content: center; touch-action: none; background-color: #000; }
+  /* СТРЕЛКИ НАВИГАЦИИ (ВИДИМЫ ТОЛЬКО НА ТЕЛЕФОНАХ) */
+  .pan-arrow { position: absolute; top: 40%; transform: translateY(-50%); z-index: 40; width: 44px; height: 44px; background: rgba(0, 0, 0, 0.4); color: white; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; cursor: pointer; backdrop-filter: blur(4px); pointer-events: auto; }
+  .pan-arrow:active { background: rgba(0, 0, 0, 0.7); }
+  .left-arrow { left: 0.5rem; }
+  .right-arrow { right: 0.5rem; }
 
-  .scene-container { position: relative; width: 100%; max-width: 96vw; aspect-ratio: 1671 / 941; max-height: 84vh; border-radius: 1rem; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8); background-color: #000; }
-  .base-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; user-select: none; }
-  .passenger-overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; user-select: none; }
+  /* АДАПТИВНЫЙ ФОН КАБИНЫ (60vh НА ТЕЛЕФОНАХ) */
+  .scene-scroll-area { flex: 1 1 0%; min-height: 0; width: 100%; overflow-x: auto; overflow-y: hidden; position: relative; display: flex; align-items: center; justify-content: flex-start; touch-action: pan-x; -webkit-overflow-scrolling: touch; background-color: #050505; }
+  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
+
+  .scene-container { position: relative; display: inline-block; max-width: 96vw; max-height: 84vh; border-radius: 1rem; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8); background-color: #000; }
+  .base-image { display: block; max-height: 84vh; max-width: 96vw; width: auto; height: auto; object-fit: contain; user-select: none; }
+  .passenger-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
 
   @media (max-width: 767px) {
-    .scene-container { max-width: 100vw; max-height: 100%; border-radius: 0; box-shadow: none; }
+    .scene-scroll-area { position: absolute; top: 18vh; height: 58vh; width: 100vw; align-items: flex-start; }
+    .scene-container { height: 100%; max-height: none; max-width: none; width: auto; aspect-ratio: 1671 / 941; border-radius: 0; box-shadow: none; flex-shrink: 0; }
+    .base-image { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: fill; }
+    .passenger-overlay { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: fill; }
   }
 
   /* КОМПАКТНАЯ НИЖНЯЯ ПАНЕЛЬ */
@@ -381,7 +393,7 @@
   .main-action-btn:active { transform: scale(0.98); }
 
   .dialogue-wrapper { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 54rem; z-index: 30; pointer-events: none; }
-  @media (max-width: 767px) { .dialogue-wrapper { max-height: 55vh; overflow-y: auto; pointer-events: auto; } }
+  @media (max-width: 767px) { .dialogue-wrapper { pointer-events: auto; } }
 
   /* Остальные классы HUD */
   .aisle-call-badge { position: absolute; z-index: 25; display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.75rem; border-radius: 0.5rem; background: linear-gradient(135deg, rgba(244, 63, 94, 0.95), rgba(225, 29, 72, 0.95)); border: 1px solid rgba(254, 205, 211, 0.9); color: #ffffff; font-size: 0.75rem; font-weight: bold; box-shadow: 0 8px 20px -3px rgba(225, 29, 72, 0.6); cursor: pointer; white-space: nowrap; }
