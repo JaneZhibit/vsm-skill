@@ -1,0 +1,24 @@
+{
+  "lesson_id": "lesson_community",
+  "track": "community",
+  "title": "Урок 1: Новые сценарии",
+  "description": "Новые инциденты, созданные через Конструктор.",
+  "incidents": [
+    {
+      "incident_id": "evt_1790518036995",
+      "delay_seconds": 15
+    },
+    {
+      "incident_id": "evt_1790533380993",
+      "delay_seconds": 60
+    },
+    {
+      "incident_id": "evt_1790533658594",
+      "delay_seconds": 100
+    },
+    {
+      "incident_id": "evt_1790534577625",
+      "delay_seconds": 140
+    }
+  ]
+}
