@@ -359,14 +359,12 @@
   .vn-dialogue-box {
     width: 100%; z-index: 30; pointer-events: auto;
     background: rgba(20, 18, 16, 0.96); backdrop-filter: blur(12px);
-    border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 1rem 1rem 0 0;
+    border: 1px solid rgba(245, 158, 11, 0.5);
+    border-radius: 1rem; /* Скруглено со всех сторон */
     padding: 0.75rem 1rem;
-    padding-bottom: max(1rem, env(safe-area-inset-bottom));
-    box-shadow: 0 -10px 30px rgba(0,0,0,0.8);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.7);
     display: flex; flex-direction: column; gap: 0.25rem;
-  }
-  @media (min-width: 768px) {
-    .vn-dialogue-box { border-radius: 1rem; padding-bottom: 0.75rem; box-shadow: 0 10px 30px rgba(0,0,0,0.7); }
+    max-height: 60vh; overflow-y: auto;
   }
   .vn-speaker-bar { border-bottom: 1px solid rgba(61, 56, 49, 0.5); padding-bottom: 0.4rem; transition: background-color 0.2s; }
   .vn-speech-area { background: rgba(26, 24, 22, 0.6); border: 1px solid rgba(61, 56, 49, 0.5); border-radius: 0.5rem; padding: 0.5rem; min-height: 2.5rem; }
