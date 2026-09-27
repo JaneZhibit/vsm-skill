@@ -20,7 +20,7 @@ export interface PassengerProfile {
   passport_data: string; // "45 21 849201"
   archetype_id: ArchetypeId;
   state: string; // "neutral", "happy", "annoyed", "sleeping", "gadget", etc.
-  sprite_url: string; // "/assets/passengers/male_young/neutral.png"
+  sprite_url: string; // "/assets/male_young/neutral.png"
   destination: string;
   ticket_status: TicketStatus;
   observation: string;

@@ -142,7 +142,7 @@ def generate_passenger(
     full_name = f"{last_name} {first_name} {patronymic}"
     birth_date = generate_birth_date(age)
     passport_data = generate_passport(age)
-    sprite_url = f"/assets/passengers/{archetype}/{state}.png"
+    sprite_url = f"/assets/{archetype}/{state}.png"
 
     if destination is None:
         destination = "Санкт-Петербург (Главный)" if random.random() < 0.75 else "Новая Тверь"

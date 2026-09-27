@@ -362,13 +362,15 @@
         <!-- 2. Пассажир (динамический спрайт) -->
         {#if selectedSeat?.isOccupied && selectedSeat?.passenger}
           {@const p = selectedSeat.passenger}
+          {@const rawSprite = trainWorld.currentPassengerSprite || p.sprite_url || ''}
+          {@const cleanSprite = rawSprite.replace('/assets/passengers/', '/assets/')}
           <img
-            src={trainWorld.currentPassengerSprite || p.sprite_url}
+            src={cleanSprite}
             alt={p.full_name}
             class="passenger-overlay"
             onerror={(e) => {
               const target = e.currentTarget as HTMLImageElement;
-              target.src = `/assets/passengers/${p.archetype_id}/neutral.png`;
+              target.src = `/assets/${p.archetype_id}/neutral.png`;
             }}
           />
         {:else if !isCabinEmpty && trainWorld.passengerMood !== 'empty'}

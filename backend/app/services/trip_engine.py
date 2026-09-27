@@ -105,7 +105,7 @@ class TripEngine:
                 if seat.passenger:
                     seat.passenger.state = new_mood
                     sprite_mood = "neutral" if new_mood == "calm" else new_mood
-                    seat.passenger.sprite_url = f"/assets/passengers/{seat.passenger.archetype_id}/{sprite_mood}.png"
+                    seat.passenger.sprite_url = f"/assets/{seat.passenger.archetype_id}/{sprite_mood}.png"
 
                     if loyalty_delta > 0 or new_mood in ["calm", "happy", "neutral"]:
                         seat.passenger.ticket_status = "validated"

@@ -36,7 +36,11 @@
   let existingScenarios = $state<{id: string, title: string}[]>([]);
 
   // Словари для UI
-  const ALL_MOODS = ['neutral', 'angry', 'happy', 'sleeping', 'sick', 'drunk', 'vaping_calm', 'vaping_angry', 'crying'];
+  const ALL_MOODS = [
+    'neutral', 'angry', 'happy', 'sleeping', 'sick', 'drunk',
+    'vaping_calm', 'vaping_angry', 'crying',
+    'vape_annoyed', 'vape_demanding', 'vape_gadget', 'vape_neutral'
+  ];
   let AUDIO_FILES = $state([
     { id: '', label: '🔇 Без звука' },
     { id: 'crying_child.mp3', label: '😭 Плач ребенка' },
@@ -46,7 +50,7 @@
 
   // --- РЕАКТИВНЫЙ ПРЕВЬЮ ПАССАЖИРА ---
   let previewArchetype = $derived(targetArchetype === 'any' ? 'male_young' : targetArchetype);
-  let previewImageUrl = $derived(`/assets/passengers/${previewArchetype}/${activePreviewMood}.png`);
+  let previewImageUrl = $derived(`/assets/${previewArchetype}/${activePreviewMood}.png`);
 
   onMount(async () => {
     // Загружаем список существующих событий для "Цепной реакции"
@@ -222,7 +226,7 @@
               src={previewImageUrl} 
               alt="Превью" 
               class="h-[85%] object-contain opacity-90 transition-all duration-300" 
-              onerror={(e) => { const img = e.currentTarget as HTMLImageElement; img.src = `/assets/passengers/${previewArchetype}/neutral.png`; }} 
+              onerror={(e) => { const img = e.currentTarget as HTMLImageElement; img.src = `/assets/${previewArchetype}/neutral.png`; }} 
             />
           </div>
 
@@ -239,9 +243,9 @@
                 >
                   <!-- Маленькая превьюшка -->
                   <img 
-                    src={`/assets/passengers/${previewArchetype}/${mood}.png`} 
+                    src={`/assets/${previewArchetype}/${mood}.png`} 
                     class="w-full h-full object-cover opacity-80 group-hover:opacity-100" 
-                    onerror={(e) => { const img = e.currentTarget as HTMLImageElement; img.src = `/assets/passengers/${previewArchetype}/neutral.png`; }} 
+                    onerror={(e) => { const img = e.currentTarget as HTMLImageElement; img.src = `/assets/${previewArchetype}/neutral.png`; }} 
                     alt={mood}
                   />
                   

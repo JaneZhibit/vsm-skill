@@ -43,7 +43,7 @@ class TestChainedAndUpload(unittest.TestCase):
             birth_date="01.01.2000",
             passport_data="1234 567890",
             state="annoyed",
-            sprite_url="/assets/passengers/male_young/neutral.png",
+            sprite_url="/assets/male_young/neutral.png",
             destination="Тверь",
             ticket_status="validated",
             observation=""
@@ -155,7 +155,7 @@ class TestChainedAndUpload(unittest.TestCase):
             birth_date="01.01.2002",
             passport_data="1234 567890",
             state="neutral",
-            sprite_url="/assets/passengers/male_young/neutral.png",
+            sprite_url="/assets/male_young/neutral.png",
             destination="Тверь",
             ticket_status="validated",
             observation=""

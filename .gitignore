@@ -64,3 +64,4 @@ raw_audio
 .project_snapshots/
 project_snapshot.py
 .agents/
+storage/audio/ambient/test_*.mp3

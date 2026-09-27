@@ -36,12 +36,27 @@ function serveStorage(): Plugin {
   };
 }
 
+function rewritePassengers(): Plugin {
+  return {
+    name: 'rewrite-passengers',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        if (req.url && req.url.startsWith('/assets/passengers/')) {
+          req.url = req.url.replace('/assets/passengers/', '/assets/');
+        }
+        next();
+      });
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
     tailwindcss(),
     svelte(),
     serveStorage(),
+    rewritePassengers(),
   ],
   server: {
     port: 5173,

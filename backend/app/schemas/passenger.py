@@ -19,7 +19,7 @@ class PassengerProfile(BaseModel):
     passport_data: str  # "45 21 789123"
     archetype_id: ArchetypeId
     state: str  # "neutral", "sleeping", etc.
-    sprite_url: str  # "/assets/passengers/male_young/neutral.png"
+    sprite_url: str  # "/assets/male_young/neutral.png"
     destination: str
     ticket_status: TicketStatus
     observation: str  # Текстовое описание того, что видит проводник глазами

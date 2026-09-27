@@ -290,7 +290,7 @@ class GameMaster:
         seat.passenger.state = new_state
         
         # Обновляем спрайт
-        seat.passenger.sprite_url = f"/assets/passengers/{seat.passenger.archetype_id}/{new_state}.png"
+        seat.passenger.sprite_url = f"/assets/{seat.passenger.archetype_id}/{new_state}.png"
         
         is_passive = scenario.get("is_passive", False)
         phase_str = "passive" if is_passive else "urgent"
@@ -347,15 +347,15 @@ class GameMaster:
 
             if inc_id == "live_drunk":
                 target_seat.passenger.state = "drunk"
-                target_seat.passenger.sprite_url = f"/assets/passengers/{target_seat.passenger.archetype_id}/drunk.png"
+                target_seat.passenger.sprite_url = f"/assets/{target_seat.passenger.archetype_id}/drunk.png"
             elif inc_id == "live_crying_child":
                 self.crying_start_time = current_time
                 self.crying_seat_id = target_seat.seat_id
                 target_seat.passenger.state = "annoyed"
-                target_seat.passenger.sprite_url = f"/assets/passengers/{target_seat.passenger.archetype_id}/annoyed.png"
+                target_seat.passenger.sprite_url = f"/assets/{target_seat.passenger.archetype_id}/annoyed.png"
             else:
                 target_seat.passenger.state = "annoyed"
-                target_seat.passenger.sprite_url = f"/assets/passengers/{target_seat.passenger.archetype_id}/annoyed.png"
+                target_seat.passenger.sprite_url = f"/assets/{target_seat.passenger.archetype_id}/annoyed.png"
 
     def spawn_incident(self, seats: List[SeatInfo], force_incident: Optional[str] = None) -> None:
         """Назначает инцидент случайному пассажиру."""
@@ -374,7 +374,7 @@ class GameMaster:
             target_seat.active_incident = ActiveIncidentSchema(**incident_data)
             new_state = SCENARIOS_DB.get(incident_id, {}).get("passenger_state_during", "annoyed")
             target_seat.passenger.state = new_state
-            target_seat.passenger.sprite_url = f"/assets/passengers/{target_seat.passenger.archetype_id}/{new_state}.png"
+            target_seat.passenger.sprite_url = f"/assets/{target_seat.passenger.archetype_id}/{new_state}.png"
 
     def apply_lesson_protection(self, result: dict) -> dict:
         """В режиме 'Урок' защищает от снятия баллов и дает обучающий фидбек."""
