@@ -134,23 +134,24 @@ class GameMaster:
         self.active_triggers = remaining
         return events_to_fire
 
-    def spawn_incident(self, seats: List[SeatInfo], force_incident: Optional[str] = None) -> None:
+    def spawn_incident(self, seats: List[SeatInfo], force_incident: Optional[str] = None) -> bool:
         """Принудительный спавн инцидента."""
-        for seat in seats:
-            seat.active_incident = None
-
         occupied = [s for s in seats if s.is_occupied and s.passenger]
         if not occupied:
-            return
+            return False
 
         keys = list(SCENARIOS_DB.keys())
         available_keys = [k for k in keys if k not in self.running_incidents and k not in self.resolved_incidents]
         if not force_incident and not available_keys:
-            return
+            return False
         incident_id = force_incident or random.choice(available_keys)
 
         if incident_id in self.running_incidents or incident_id in self.resolved_incidents:
-            return
+            return False
+            
+        for seat in seats:
+            seat.active_incident = None
+            
         incident_data = get_frontend_incident_data(incident_id)
         scenario = SCENARIOS_DB.get(incident_id, {})
         
@@ -176,6 +177,7 @@ class GameMaster:
             target_seat.passenger.state = new_state
             sprite_mood = "neutral" if new_state == "calm" else new_state
             target_seat.passenger.sprite_url = f"/assets/{target_seat.passenger.archetype_id}/{sprite_mood}.png"
+        return True
 
     def apply_lesson_protection(self, result: dict) -> dict:
         res_copy = dict(result)
@@ -191,5 +193,11 @@ class GameMaster:
         
         return res_copy
 
+
+
+
+
+
+        return True
 
 

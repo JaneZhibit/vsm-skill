@@ -1,4 +1,4 @@
-import uuid
+﻿import uuid
 from typing import Optional, Dict, Any
 from app.schemas.passenger import CabinManifestResponse, StationEventResponse
 from app.services.passenger_manager import PassengerManager
@@ -6,7 +6,7 @@ from app.services.gm_orchestrator import GameMaster
 from app.services.trip_engine_utils import MAX_PASSENGERS
 
 class TripEngine:
-    """Оркестратор поездки. Связывает физику, пассажиров и ИИ-дирижера."""
+    """РћСЂРєРµСЃС‚СЂР°С‚РѕСЂ РїРѕРµР·РґРєРё. РЎРІСЏР·С‹РІР°РµС‚ С„РёР·РёРєСѓ, РїР°СЃСЃР°Р¶РёСЂРѕРІ Рё РР-РґРёСЂРёР¶РµСЂР°."""
 
     def __init__(self):
         self.trip_id: str = str(uuid.uuid4())
@@ -25,18 +25,18 @@ class TripEngine:
         min_passengers: int = 13,
         max_passengers: int = 18,
     ) -> dict:
-        """Создает новый рейс, возвращая таймлайн и стартовую позицию."""
+        """РЎРѕР·РґР°РµС‚ РЅРѕРІС‹Р№ СЂРµР№СЃ, РІРѕР·РІСЂР°С‰Р°СЏ С‚Р°Р№РјР»Р°Р№РЅ Рё СЃС‚Р°СЂС‚РѕРІСѓСЋ РїРѕР·РёС†РёСЋ."""
         user = user or {}
         self.trip_id = str(uuid.uuid4())
         
-        # 1. Генерируем таймлайн и стартовые условия через Game Master
+        # 1. Р“РµРЅРµСЂРёСЂСѓРµРј С‚Р°Р№РјР»Р°Р№РЅ Рё СЃС‚Р°СЂС‚РѕРІС‹Рµ СѓСЃР»РѕРІРёСЏ С‡РµСЂРµР· Game Master
         setup = self.game_master.generate_timeline(mode, user)
         self.time_seconds = setup["start_time"]
         self.shift_phase = setup["start_phase"]
-        self.speed = 0.0  # Поезд стоит на станции
+        self.speed = 0.0  # РџРѕРµР·Рґ СЃС‚РѕРёС‚ РЅР° СЃС‚Р°РЅС†РёРё
         self.game_master.init_triggers(mode=mode, start_time=self.time_seconds)
         
-        # 2. Вагон ПУСТ при старте смены в 13:50 (Приемка), либо заселен если это Урок
+        # 2. Р’Р°РіРѕРЅ РџРЈРЎРў РїСЂРё СЃС‚Р°СЂС‚Рµ СЃРјРµРЅС‹ РІ 13:50 (РџСЂРёРµРјРєР°), Р»РёР±Рѕ Р·Р°СЃРµР»РµРЅ РµСЃР»Рё СЌС‚Рѕ РЈСЂРѕРє
         if mode.startswith("lesson_"):
             self.passenger_manager.generate_initial_manifest(
                 min_passengers=min_passengers,
@@ -53,13 +53,13 @@ class TripEngine:
         }
 
     def board_passengers(self, min_passengers: int = 13, max_passengers: int = 18) -> CabinManifestResponse:
-        """Осуществляет посадку пассажиров перед самым отправлением."""
+        """РћСЃСѓС‰РµСЃС‚РІР»СЏРµС‚ РїРѕСЃР°РґРєСѓ РїР°СЃСЃР°Р¶РёСЂРѕРІ РїРµСЂРµРґ СЃР°РјС‹Рј РѕС‚РїСЂР°РІР»РµРЅРёРµРј."""
         self.passenger_manager.generate_initial_manifest(
             min_passengers=min_passengers,
             max_passengers=max_passengers,
         )
         self.shift_phase = "cruise"
-        self.time_seconds = 50400.0  # Устанавливаем ровно на 14:00 (Отправление)
+        self.time_seconds = 50400.0  # РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј СЂРѕРІРЅРѕ РЅР° 14:00 (РћС‚РїСЂР°РІР»РµРЅРёРµ)
         return self.passenger_manager.get_manifest()
 
     def generate_timeline(self, mode: str = "pro", user: Optional[Dict[str, Any]] = None) -> list:
@@ -70,8 +70,8 @@ class TripEngine:
         return self.passenger_manager.get_manifest()
 
     def spawn_incident(self, force_incident: Optional[str] = None):
-        self.game_master.spawn_incident(self.passenger_manager.seats, force_incident)
-        return self.get_manifest()
+        success = self.game_master.spawn_incident(self.passenger_manager.seats, force_incident)
+        return self.get_manifest(), success
 
     def process_tick(self, current_time: float, current_speed: Optional[float] = None) -> list:
         self.time_seconds = current_time
@@ -82,14 +82,14 @@ class TripEngine:
         return self.passenger_manager.process_station(station_index)
 
     def resolve_incident(self, incident_id: str, raw_result: Optional[dict] = None, **kwargs) -> None:
-        """Обновляет статус вагона после решения ИИ или клика по кнопке."""
+        """РћР±РЅРѕРІР»СЏРµС‚ СЃС‚Р°С‚СѓСЃ РІР°РіРѕРЅР° РїРѕСЃР»Рµ СЂРµС€РµРЅРёСЏ РР РёР»Рё РєР»РёРєР° РїРѕ РєРЅРѕРїРєРµ."""
         if raw_result is None:
             raw_result = {
                 "mood": kwargs.get("new_mood", "calm"),
                 "loyalty_delta": kwargs.get("loyalty_delta", 0),
             }
 
-        # GameMaster может отменить штрафы в режиме урока
+        # GameMaster РјРѕР¶РµС‚ РѕС‚РјРµРЅРёС‚СЊ С€С‚СЂР°С„С‹ РІ СЂРµР¶РёРјРµ СѓСЂРѕРєР°
         final_result = self.game_master.apply_lesson_protection(raw_result)
         new_mood = final_result.get("mood", "calm")
         loyalty_delta = final_result.get("loyalty_delta", 0)
@@ -126,3 +126,4 @@ class TripManager:
         return self.active_trips[user_id]
 
 trip_manager = TripManager()
+
