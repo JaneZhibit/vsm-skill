@@ -145,7 +145,8 @@ class PolzaAIService:
         passenger_profile: Optional[dict] = None,
         conductor_gender: str = "m",
         ai_persona: str = "",
-        allowed_moods: Optional[list] = None
+        allowed_moods: Optional[list] = None,
+        dialog_history: Optional[list] = None
     ) -> Dict[str, Any]:
         cond_gender_str = "Мужчина" if conductor_gender == "m" else "Девушка"
         profile = passenger_profile or {}
@@ -171,19 +172,23 @@ class PolzaAIService:
 Правило, которому он должен был следовать: {expected_rule}.
 
 ЗАДАЧА:
-1. Ответь проводнику строго в соответствии со своим характером ({trait_ru}). Если он груб или не решил проблему — возмущайся. Если вежлив и прав — соглашайся.
+1. Ответь проводнику строго в соответствии со своим характером ({trait_ru}). Если он груб или не решил проблему — возмущайся. Если вежлив и прав — соглашайся. В свободном разговоре поддерживай естественный диалог пассажира скоростного поезда с учетом контекста беседы.
 2. Выбери свое визуальное состояние (спрайт) строго из списка: {sprites}.
 3. Оцени проводника.
 
 Выведи ответ строго в JSON по указанной схеме.
 """
 
+        messages = [{"role": "system", "content": system_prompt}]
+        if dialog_history:
+            for turn in dialog_history:
+                if isinstance(turn, dict) and "role" in turn and "content" in turn:
+                    messages.append({"role": turn["role"], "content": turn["content"]})
+        messages.append({"role": "user", "content": f"Проводник: «{conductor_text}»"})
+
         payload = {
             "model": settings.POLZA_CHAT_MODEL,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Проводник: «{conductor_text}»"}
-            ],
+            "messages": messages,
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {

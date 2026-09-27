@@ -71,6 +71,63 @@ class TestVoiceExamAndPolza(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res_elderly, "FAKE_BASE64_AUDIO")
             self.assertEqual(captured_payloads[-1]["voice"], "Sulafat")
 
+    async def test_dialog_history_in_voice_prompt(self):
+        """Проверка добавления истории реплик в payload LLM."""
+        captured_payloads = []
+
+        class MockResponse:
+            status_code = 200
+            def json(self):
+                return {
+                    "choices": [{
+                        "message": {
+                            "content": '{"is_passed": true, "loyalty_delta": 10, "safety_delta": 5, "mood": "happy", "passenger_reply": "Спасибо за чай!", "feedback_title": "Вежливость", "feedback_text": "Хорошо."}'
+                        }
+                    }]
+                }
+
+        async def mock_post(url, headers=None, json=None):
+            captured_payloads.append(json)
+            return MockResponse()
+
+        history = [
+            {"role": "user", "content": "Проводник: «Здравствуйте! Хотите чай или кофе?»"},
+            {"role": "assistant", "content": "Пассажир: «Здравствуйте, черный чай, пожалуйста.»"}
+        ]
+
+        with patch("httpx.AsyncClient.post", side_effect=mock_post):
+            res = await polza_ai.evaluate_conductor_voice_response(
+                incident_title="Разговор с пассажиром",
+                passenger_prompt="",
+                conductor_text="Вот ваш чай с лимоном, приятного аппетита!",
+                expected_rule="Вежливое обслуживание",
+                dialog_history=history
+            )
+            self.assertEqual(res["mood"], "happy")
+            self.assertEqual(res["passenger_reply"], "Спасибо за чай!")
+            sent_messages = captured_payloads[-1]["messages"]
+            self.assertEqual(len(sent_messages), 4) # system, 2 history items, user
+            self.assertEqual(sent_messages[1]["content"], history[0]["content"])
+            self.assertEqual(sent_messages[2]["content"], history[1]["content"])
+            self.assertIn("Вот ваш чай", sent_messages[3]["content"])
+
+    def test_seat_free_talk_resolution(self):
+        """Проверка разрешения свободного диалога напрямую по seat_id в trip_engine."""
+        from app.services.trip_engine import TripEngine
+        engine = TripEngine()
+        engine.create_new_trip()
+        engine.board_passengers(min_passengers=5, max_passengers=10)
+
+        occupied_seat = next((s for s in engine.passenger_manager.seats if s.is_occupied), None)
+        self.assertIsNotNone(occupied_seat)
+        target_seat_id = occupied_seat.seat_id
+
+        # Разрешаем свободный диалог по номеру кресла
+        engine.resolve_incident(target_seat_id, {"mood": "happy", "loyalty_delta": 15})
+        self.assertEqual(occupied_seat.passenger.state, "happy")
+        self.assertIn("/happy.png", occupied_seat.passenger.sprite_url)
+        self.assertEqual(occupied_seat.passenger.ticket_status, "validated")
+
 
 if __name__ == "__main__":
     unittest.main()

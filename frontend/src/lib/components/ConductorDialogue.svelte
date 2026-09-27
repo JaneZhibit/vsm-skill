@@ -15,7 +15,10 @@
   let currentIncident = $derived<ActiveIncident | null>(dialogIncident || activeIncident || null);
   
   let currentStepId = $state<string>('step_1');
-  let currentStep = $derived<any>(currentIncident?.steps?.[currentStepId] || currentIncident);
+  let currentStep = $derived<any>(currentIncident?.steps?.[currentStepId] || currentIncident || { options: [] });
+
+  let isEditingVoice = $state<boolean>(false);
+  let editableTranscript = $state<string>('');
 
   // --- ЛОГИКА РЕЖИМОВ ---
   let isProMode = $derived(trainWorld.tripMode === 'pro');
@@ -138,6 +141,8 @@
     currentStepId = 'step_1';
     feedbackResult = null;
     isTimeout = false;
+    isEditingVoice = false;
+    editableTranscript = '';
     trainAudio.setAmbientDucking(false);
   }
 
@@ -264,9 +269,10 @@
       playClickSound();
 
       if (sendData) {
-        const textToSend = (finalTranscript + ' ' + interimTranscript).trim();
-        if (textToSend) {
-          handleTextRecorded(textToSend);
+        // Вместо мгновенной отправки, открываем редактор
+        editableTranscript = (finalTranscript + ' ' + interimTranscript).trim();
+        if (editableTranscript) {
+          isEditingVoice = true; // Открываем режим редактирования
         } else {
           micError = 'Вы ничего не сказали. Попробуйте еще раз.';
           playErrorSound();
@@ -278,9 +284,14 @@
     }
   }
 
+  // Функция для итоговой отправки отредактированного текста
+  function submitEditedText() {
+    isEditingVoice = false;
+    handleTextRecorded(editableTranscript);
+  }
+
   async function handleTextRecorded(text: string) {
     const inc = currentIncident;
-    if (!inc) return;
     isAnalyzingVoice = true; 
     stopTimer();
 
@@ -294,13 +305,14 @@
     }
 
     try {
-      // Отправляем на бэкенд ТЕКСТ (audioBlob = null)
+      // Если инцидента нет, мы передаем ID кресла (например "2A") вместо incident_id!
+      const targetId = inc?.incident_id || currentSeat?.id || 'free_talk';
       const res = await trainWorld.resolveVoiceIncident(
-        inc.incident_id, 
+        targetId, 
         null, 
         text, 
         String(fullDialogueText), 
-        currentStep?.expected_rule
+        currentStep?.expected_rule || 'Свободное вежливое общение'
       );
 
       // Глушим филлер, когда получен ответ от сервера
@@ -372,12 +384,25 @@
         {@render FeedbackInterface()}
       {/if}
     {:else}
-      <div class="flex gap-2 justify-end">
-        {#if currentSeat?.isOccupied && currentSeat.ticketStatus !== 'validated'}
-          <button class="action-btn text-emerald-300" onclick={() => trainWorld.validateCurrentSeat()}>📲 Проверить (АСКП)</button>
-        {/if}
-        <button class="action-btn text-stone-400" onclick={() => trainWorld.switchView('aisle')}>⬅ В проход</button>
-      </div>
+      <!-- СВОБОДНЫЙ ДИАЛОГ (FREE-TALK) С ПАССАЖИРОМ В ЛЮБОЙ МОМЕНТ -->
+      {#if currentSeat?.isOccupied && isProMode}
+        <div class="flex flex-col w-full gap-2">
+          {@render VoiceInterface()}
+          <div class="flex gap-2 justify-end pt-1 border-t border-[#3d3831]/50">
+            {#if currentSeat.ticketStatus !== 'validated'}
+              <button class="action-btn text-emerald-300 text-xs" onclick={() => trainWorld.validateCurrentSeat()}>📲 Проверить (АСКП)</button>
+            {/if}
+            <button class="action-btn text-stone-400 text-xs" onclick={() => trainWorld.switchView('aisle')}>⬅ В проход</button>
+          </div>
+        </div>
+      {:else}
+        <div class="flex gap-2 justify-end">
+          {#if currentSeat?.isOccupied && currentSeat.ticketStatus !== 'validated'}
+            <button class="action-btn text-emerald-300" onclick={() => trainWorld.validateCurrentSeat()}>📲 Проверить (АСКП)</button>
+          {/if}
+          <button class="action-btn text-stone-400" onclick={() => trainWorld.switchView('aisle')}>⬅ В проход</button>
+        </div>
+      {/if}
     {/if}
   </div>
 </div>
@@ -418,24 +443,45 @@
             {/if}
           </div>
         </div>
+      {:else if isEditingVoice}
+        <!-- РЕЖИМ РЕДАКТИРОВАНИЯ ТЕКСТА ПЕРЕД ОТПРАВКОЙ -->
+        <div class="flex flex-col gap-1.5 w-full text-left" in:fade={{ duration: 150 }}>
+          <div class="flex justify-between items-center text-[11px] text-amber-400 font-bold">
+            <span>✏️ Проверьте и отредактируйте распознанную фразу:</span>
+            <span class="text-stone-400 font-normal">Enter не отправляет</span>
+          </div>
+          <textarea
+            bind:value={editableTranscript}
+            rows="2"
+            class="w-full p-2.5 rounded-lg bg-black/70 border border-amber-500/60 text-white text-sm focus:outline-none focus:border-amber-400 resize-none font-sans"
+            placeholder="Что вы сказали пассажиру..."
+          ></textarea>
+        </div>
       {:else if isAnalyzingVoice}
         <span class="text-amber-400 font-bold">LLM оценивает ваш ответ по регламенту...</span>
       {:else}
-        Нажмите микрофон и ответьте голосом. Речь мгновенно распознается в браузере.
+        {currentIncident ? 'Нажмите микрофон и ответьте голосом. Речь мгновенно распознается в браузере.' : 'Нажмите микрофон, чтобы заговорить с пассажиром в свободной форме.'}
       {/if}
     </div>
     
     <div class="flex gap-2 w-full justify-center mt-1">
-      {#if !isRecording}
+      {#if !isRecording && !isEditingVoice}
         <button onclick={startRecording} disabled={isAnalyzingVoice} class="px-6 py-2.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 text-black font-bold text-sm shadow-lg disabled:opacity-50 flex gap-2">
           {isAnalyzingVoice ? '⏳ Ожидайте...' : '🎙️ Начать ответ'}
         </button>
-      {:else}
+      {:else if isRecording}
         <button onclick={() => stopRecording(false)} class="px-4 py-2.5 rounded-full bg-[#282420] text-stone-300 font-bold text-sm border border-[#3d3831] shadow-lg">
           ✖ Отмена
         </button>
         <button onclick={() => stopRecording(true)} class="flex-1 max-w-[200px] px-6 py-2.5 rounded-full bg-rose-600 text-white font-bold text-sm shadow-[0_0_15px_rgba(225,29,72,0.5)] animate-pulse flex justify-center gap-2">
-          ✅ Отправить
+          ⏹ Завершить
+        </button>
+      {:else if isEditingVoice}
+        <button onclick={() => { isEditingVoice = false; editableTranscript = ''; }} class="px-4 py-2 rounded-full bg-[#282420] text-stone-300 font-bold text-xs border border-[#3d3831] hover:bg-[#3d3831]">
+          ✖ Сбросить
+        </button>
+        <button onclick={submitEditedText} class="px-6 py-2 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-[0_0_15px_rgba(16,185,129,0.4)] flex items-center gap-1.5">
+          🚀 Отправить ИИ
         </button>
       {/if}
     </div>
@@ -511,7 +557,7 @@
     </p>
 
     <button class="self-end px-5 py-2 mt-1 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 text-stone-950 font-bold text-xs rounded-lg shadow-md" onclick={handleComplete} disabled={!feedbackResult}>
-      Завершить инцидент ➔
+      {currentIncident ? 'Завершить инцидент ➔' : 'Продолжить диалог ➔'}
     </button>
   </div>
 {/snippet}

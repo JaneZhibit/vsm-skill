@@ -95,13 +95,13 @@ class TripEngine:
         loyalty_delta = final_result.get("loyalty_delta", 0)
 
         for seat in self.passenger_manager.seats:
-            if not seat.active_incident:
-                continue
+            inc_id = None
+            if seat.active_incident:
+                inc_id = seat.active_incident.get("incident_id") if isinstance(seat.active_incident, dict) else getattr(seat.active_incident, "incident_id", None)
 
-            inc_id = seat.active_incident.get("incident_id") if isinstance(seat.active_incident, dict) else getattr(seat.active_incident, "incident_id", None)
-
-            if inc_id == incident_id:
-                seat.active_incident = None
+            if inc_id == incident_id or seat.seat_id == incident_id:
+                if seat.active_incident:
+                    seat.active_incident = None
                 if seat.passenger:
                     seat.passenger.state = new_mood
                     sprite_mood = "neutral" if new_mood == "calm" else new_mood

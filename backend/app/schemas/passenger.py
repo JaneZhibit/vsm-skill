@@ -23,6 +23,7 @@ class PassengerProfile(BaseModel):
     destination: str
     ticket_status: TicketStatus
     observation: str  # Текстовое описание того, что видит проводник глазами
+    dialog_history: list[Dict[str, str]] = []
 
 
 class ScenarioOptionSchema(BaseModel):

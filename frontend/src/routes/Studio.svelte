@@ -36,11 +36,13 @@
   let existingScenarios = $state<{id: string, title: string}[]>([]);
 
   // Словари для UI
-  const ALL_MOODS = [
-    'neutral', 'angry', 'happy', 'sleeping', 'sick', 'drunk',
-    'vaping_calm', 'vaping_angry', 'crying',
-    'vape_annoyed', 'vape_demanding', 'vape_gadget', 'vape_neutral'
-  ];
+  const MOODS_MAP: Record<string, string[]> = {
+    'male_young': ['neutral', 'angry', 'happy', 'sleeping', 'sick', 'drunk', 'vaping_calm', 'vaping_angry', 'crying'],
+    'female_young': ['neutral', 'happy', 'annoyed', 'sleeping', 'sick', 'reading', 'gadget'],
+    'female_elderly': ['neutral', 'reading', 'sleeping', 'annoyed', 'happy', 'sick'],
+    'any': ['neutral', 'angry', 'happy', 'sleeping', 'sick', 'annoyed']
+  };
+  let currentAvailableMoods = $derived(MOODS_MAP[targetArchetype] || MOODS_MAP['any']);
   let AUDIO_FILES = $state([
     { id: '', label: '🔇 Без звука' },
     { id: 'crying_child.mp3', label: '😭 Плач ребенка' },
@@ -234,7 +236,7 @@
           <div>
             <div class="text-[11px] text-[#a39e95] mb-2 block">Доступные эмоции для ИИ (Выберите нужные):</div>
             <div class="grid grid-cols-4 gap-2">
-              {#each ALL_MOODS as mood}
+              {#each currentAvailableMoods as mood}
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div 
@@ -265,6 +267,16 @@
                   </div>
                 </div>
               {/each}
+
+              <!-- Кнопка-плейсхолдер генерации нового стейта -->
+              <button 
+                onclick={() => alert("Генерация новых состояний через Midjourney/Flux API в разработке для хакатона!")} 
+                class="aspect-square rounded-lg border border-dashed border-[#3d3831] hover:border-amber-500/60 bg-[#0f0e0d]/50 hover:bg-[#1a1816] flex flex-col items-center justify-center p-1 text-center transition-all group cursor-pointer"
+                title="Сгенерировать новое состояние персонажа нейросетью"
+              >
+                <span class="text-base group-hover:scale-110 transition-transform">✨</span>
+                <span class="text-[8px] text-stone-400 group-hover:text-amber-300 font-medium leading-tight mt-1">Создать свой стейт</span>
+              </button>
             </div>
           </div>
         </div>

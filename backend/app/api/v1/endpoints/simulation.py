@@ -270,25 +270,46 @@ async def resolve_voice_incident(
     ai_persona = incident_meta.get("ai_persona", "")
     allowed_moods = incident_meta.get("allowed_moods")
 
-    # 1. Извлекаем полный профиль текущего пассажира
-    active_seat = next((s for s in engine.passenger_manager.seats if s.active_incident), None)
-    passenger_profile = active_seat.passenger.model_dump() if (active_seat and active_seat.passenger) else {}
+    # 1. Извлекаем активное кресло (по инциденту или по номеру места для свободного диалога)
+    active_seat = next((s for s in engine.passenger_manager.seats if s.active_incident and (
+        (isinstance(s.active_incident, dict) and s.active_incident.get("incident_id") == payload.incident_id) or
+        (getattr(s.active_incident, "incident_id", None) == payload.incident_id)
+    )), None)
 
-    # 2. Быстрый вызов LLM (json_schema) с мега-промптом
+    if not active_seat:
+        # Поиск по seat_id (например, "2A", "1B") для свободного разговора (Free-talk)
+        active_seat = next((s for s in engine.passenger_manager.seats if s.seat_id == payload.incident_id), None)
+        incident_title = "Обычная поездка, проверка билетов или свободный разговор"
+    else:
+        incident_title = incident_meta.get("title", payload.incident_id)
+
+    passenger_profile = active_seat.passenger.model_dump() if (active_seat and active_seat.passenger) else {}
+    history = getattr(active_seat.passenger, "dialog_history", []) if (active_seat and active_seat.passenger) else []
+
+    # 2. Быстрый вызов LLM (json_schema) с мега-промптом и историей диалога
     eval_result = await polza_ai.evaluate_conductor_voice_response(
-        incident_title=incident_meta.get("title", payload.incident_id),
+        incident_title=incident_title,
         passenger_prompt=payload.passenger_prompt,
         conductor_text=conductor_speech,
-        expected_rule=payload.expected_rule or "СТО РЖД 03.011",
+        expected_rule=payload.expected_rule or "СТО РЖД 03.011 (Вежливое общение с пассажирами)",
         passenger_profile=passenger_profile,
         conductor_gender=user.get("gender", "m"),
         ai_persona=ai_persona,
-        allowed_moods=allowed_moods
+        allowed_moods=allowed_moods,
+        dialog_history=history
     )
     eval_result = engine.game_master.apply_lesson_protection(eval_result)
 
     # 3. Синтезируем аудио ответа пассажира с динамическим голосом и темпом
     passenger_reply_text = eval_result.get("passenger_reply", "")
+    if active_seat and active_seat.passenger:
+        if not hasattr(active_seat.passenger, "dialog_history") or active_seat.passenger.dialog_history is None:
+            active_seat.passenger.dialog_history = []
+        active_seat.passenger.dialog_history.append({"role": "user", "content": f"Проводник: «{conductor_speech}»"})
+        active_seat.passenger.dialog_history.append({"role": "assistant", "content": f"Пассажир: «{passenger_reply_text}»"})
+        if len(active_seat.passenger.dialog_history) > 6:
+            active_seat.passenger.dialog_history = active_seat.passenger.dialog_history[-6:]
+
     passenger_audio_b64 = None
     if passenger_reply_text:
         archetype = passenger_profile.get("archetype_id", "female_young")
