@@ -7,6 +7,151 @@ import { authStore } from './authStore.svelte';
 export type PassengerMood = 'empty' | 'calm' | 'annoyed' | 'sleeping' | 'sick' | 'working' | 'drunk';
 export type CabinView = 'aisle' | 'seat';
 
+// Изолируем логику работы с бэкендом (Сетевой слой)
+class CabinApiHandler {
+  constructor(private store: CabinStateStore) {}
+
+  public async loadCabinManifest(): Promise<void> {
+    try {
+      this.store.isLoadingManifest = true;
+      const res = await apiFetch('/api/v1/simulation/cabin-manifest');
+      if (res.ok) {
+        const data: CabinManifestResponse = await res.json();
+        if (data?.seats) this.store.seats = data.seats.map(convertSeatInfoToPassengerSeat);
+      }
+    } catch (err) { console.warn('Manifest load error:', err); } finally { this.store.isLoadingManifest = false; }
+  }
+
+  public async startNewTripManifest(): Promise<void> {
+    try {
+      this.store.isLoadingManifest = true;
+      const res = await apiFetch('/api/v1/simulation/trip/new', { method: 'POST' });
+      if (res.ok) {
+        const rawData = await res.json();
+        const manifest = rawData.manifest || rawData;
+        if (manifest?.seats) this.store.seats = manifest.seats.map(convertSeatInfoToPassengerSeat);
+      }
+    } catch (err) { console.warn('Trip restart error:', err); } finally { this.store.isLoadingManifest = false; }
+  }
+
+  public async triggerStationEvent(stationIndex: number): Promise<StationEventResponse | null> {
+    try {
+      this.store.isStationEventLoading = true;
+      const res = await apiFetch('/api/v1/simulation/trip/station-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ station_index: stationIndex }),
+      });
+      if (res.ok) {
+        const data: StationEventResponse = await res.json();
+        if (data?.manifest?.seats) {
+          this.store.seats = data.manifest.seats.map(convertSeatInfoToPassengerSeat);
+          if (this.store.selectedSeat && !this.store.selectedSeat.isOccupied) {
+            const firstOccupied = this.store.seats.find((s) => s.isOccupied);
+            if (firstOccupied) this.store.selectedSeatId = firstOccupied.id;
+          }
+        }
+        return data;
+      }
+    } catch (err) { console.error('Station event error:', err); } finally { this.store.isStationEventLoading = false; }
+    return null;
+  }
+
+  private applyConductorStats(user: any) {
+    conductorState.loyaltyScore = user.loyalty_score;
+    conductorState.safetyScore = user.safety_tech;
+    conductorState.skills.service_psychology = user.service_psychology;
+    conductorState.skills.safety_tech = user.safety_tech;
+    conductorState.skills.routine_discipline = user.routine_discipline;
+    conductorState.skills.first_aid = user.first_aid;
+
+    conductorState.conductorProfile.incidentsResolved = user.incidents_resolved;
+    conductorState.conductorProfile.correctDecisions = user.correct_decisions;
+    if (user.incidents_resolved > 0) {
+      conductorState.conductorProfile.accuracyPercent = Math.round((user.correct_decisions / user.incidents_resolved) * 100);
+    }
+
+    authStore.fetchMe();
+
+    // 🏆 ЛОВИМ НОВЫЕ АЧИВКИ!
+    if (user.new_achievements && user.new_achievements.length > 0) {
+      conductorState.showAchievementBanner(user.new_achievements[0]);
+    }
+  }
+
+  public async resolveIncident(incidentId: string, optionId: string): Promise<any> {
+    try {
+      this.store.isStationEventLoading = true;
+      const res = await apiFetch('/api/v1/simulation/resolve-incident', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ incident_id: incidentId, option_id: optionId }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.manifest?.seats) this.store.seats = data.manifest.seats.map(convertSeatInfoToPassengerSeat);
+        if (data.user) {
+          this.applyConductorStats(data.user);
+        }
+        if (data.incident_result) this.store.passengerMood = data.incident_result.mood;
+        return data.incident_result;
+      }
+    } catch (err) { console.error('Incident resolution error:', err); } finally { this.store.isStationEventLoading = false; }
+    return null;
+  }
+
+  public async resolveVoiceIncident(
+    incidentId: string,
+    audioBlob: Blob | null,
+    conductorText?: string,
+    passengerPrompt?: string,
+    expectedRule?: string
+  ): Promise<any> {
+    try {
+      this.store.isStationEventLoading = true;
+
+      let audioBase64: string | undefined = undefined;
+      if (audioBlob) {
+        audioBase64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(audioBlob);
+        });
+      }
+
+      const res = await apiFetch('/api/v1/simulation/trip/voice-resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          incident_id: incidentId,
+          audio_base64: audioBase64,
+          conductor_text: conductorText || '',
+          passenger_prompt: passengerPrompt || '',
+          expected_rule: expectedRule || '',
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.manifest?.seats) this.store.seats = data.manifest.seats.map(convertSeatInfoToPassengerSeat);
+        if (data.user) {
+          this.applyConductorStats(data.user);
+        }
+        if (data.incident_result) this.store.passengerMood = data.incident_result.mood;
+        return data.incident_result;
+      } else {
+        console.error('Ошибка сервера при оценке голоса:', res.status);
+      }
+    } catch (err) {
+      console.error('Voice incident resolution error:', err);
+    } finally {
+      this.store.isStationEventLoading = false;
+    }
+    return null;
+  }
+}
+
+// Главный стор, отвечающий ТОЛЬКО за состояние визуального салона
 export class CabinStateStore {
   seats = $state<PassengerSeat[]>([]);
   selectedSeatId = $state<string>('2A');
@@ -14,6 +159,8 @@ export class CabinStateStore {
   isStationEventLoading = $state<boolean>(false);
   passengerMood = $state<PassengerMood>('calm');
   currentView = $state<CabinView>('aisle');
+
+  private api = new CabinApiHandler(this);
 
   get selectedSeat(): PassengerSeat | undefined {
     return this.seats.find((s) => s.id === this.selectedSeatId);
@@ -101,161 +248,13 @@ export class CabinStateStore {
     }
   }
 
-  public async loadCabinManifest(): Promise<void> {
-    try {
-      this.isLoadingManifest = true;
-      const res = await apiFetch('/api/v1/simulation/cabin-manifest');
-      if (res.ok) {
-        const data: CabinManifestResponse = await res.json();
-        if (data?.seats) this.seats = data.seats.map(convertSeatInfoToPassengerSeat);
-      }
-    } catch (err) { console.warn('Manifest load error:', err); } finally { this.isLoadingManifest = false; }
-  }
-
-  public async startNewTripManifest(): Promise<void> {
-    try {
-      this.isLoadingManifest = true;
-      const res = await apiFetch('/api/v1/simulation/trip/new', { method: 'POST' });
-      if (res.ok) {
-        const rawData = await res.json();
-        const manifest = rawData.manifest || rawData;
-        if (manifest?.seats) this.seats = manifest.seats.map(convertSeatInfoToPassengerSeat);
-      }
-    } catch (err) { console.warn('Trip restart error:', err); } finally { this.isLoadingManifest = false; }
-  }
-
-  public async triggerStationEvent(stationIndex: number): Promise<StationEventResponse | null> {
-    try {
-      this.isStationEventLoading = true;
-      const res = await apiFetch('/api/v1/simulation/trip/station-event', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ station_index: stationIndex }),
-      });
-      if (res.ok) {
-        const data: StationEventResponse = await res.json();
-        if (data?.manifest?.seats) {
-          this.seats = data.manifest.seats.map(convertSeatInfoToPassengerSeat);
-          if (this.selectedSeat && !this.selectedSeat.isOccupied) {
-            const firstOccupied = this.seats.find((s) => s.isOccupied);
-            if (firstOccupied) this.selectedSeatId = firstOccupied.id;
-          }
-        }
-        return data;
-      }
-    } catch (err) { console.error('Station event error:', err); } finally { this.isStationEventLoading = false; }
-    return null;
-  }
-
-  public async resolveIncident(incidentId: string, optionId: string): Promise<any> {
-    try {
-      this.isStationEventLoading = true;
-      const res = await apiFetch('/api/v1/simulation/resolve-incident', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ incident_id: incidentId, option_id: optionId }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.manifest?.seats) this.seats = data.manifest.seats.map(convertSeatInfoToPassengerSeat);
-        if (data.user) {
-          conductorState.loyaltyScore = data.user.loyalty_score;
-          conductorState.safetyScore = data.user.safety_tech;
-          conductorState.skills.service_psychology = data.user.service_psychology;
-          conductorState.skills.safety_tech = data.user.safety_tech;
-          conductorState.skills.routine_discipline = data.user.routine_discipline;
-          conductorState.skills.first_aid = data.user.first_aid;
-          
-          // Обновляем статистику для дашборда
-          conductorState.conductorProfile.incidentsResolved = data.user.incidents_resolved;
-          conductorState.conductorProfile.correctDecisions = data.user.correct_decisions;
-          if (data.user.incidents_resolved > 0) {
-            conductorState.conductorProfile.accuracyPercent = Math.round((data.user.correct_decisions / data.user.incidents_resolved) * 100);
-          }
-          
-          authStore.fetchMe();
-
-          // 🏆 ЛОВИМ НОВЫЕ АЧИВКИ!
-          if (data.user.new_achievements && data.user.new_achievements.length > 0) {
-            // Показываем первую полученную ачивку (если их несколько)
-            conductorState.showAchievementBanner(data.user.new_achievements[0]);
-          }
-        }
-        if (data.incident_result) this.passengerMood = data.incident_result.mood;
-        return data.incident_result;
-      }
-    } catch (err) { console.error('Incident resolution error:', err); } finally { this.isStationEventLoading = false; }
-    return null;
-  }
-
-  public async resolveVoiceIncident(
-    incidentId: string,
-    audioBlob: Blob | null,
-    conductorText?: string,
-    passengerPrompt?: string,
-    expectedRule?: string
-  ): Promise<any> {
-    try {
-      this.isStationEventLoading = true;
-
-      let audioBase64: string | undefined = undefined;
-      if (audioBlob) {
-        audioBase64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(audioBlob);
-        });
-      }
-
-      const res = await apiFetch('/api/v1/simulation/trip/voice-resolve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          incident_id: incidentId,
-          audio_base64: audioBase64,
-          conductor_text: conductorText || '',
-          passenger_prompt: passengerPrompt || '',
-          expected_rule: expectedRule || '',
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.manifest?.seats) this.seats = data.manifest.seats.map(convertSeatInfoToPassengerSeat);
-        if (data.user) {
-          conductorState.loyaltyScore = data.user.loyalty_score;
-          conductorState.safetyScore = data.user.safety_tech;
-          conductorState.skills.service_psychology = data.user.service_psychology;
-          conductorState.skills.safety_tech = data.user.safety_tech;
-          conductorState.skills.routine_discipline = data.user.routine_discipline;
-          conductorState.skills.first_aid = data.user.first_aid;
-          
-          // Обновляем статистику для дашборда
-          conductorState.conductorProfile.incidentsResolved = data.user.incidents_resolved;
-          conductorState.conductorProfile.correctDecisions = data.user.correct_decisions;
-          if (data.user.incidents_resolved > 0) {
-            conductorState.conductorProfile.accuracyPercent = Math.round((data.user.correct_decisions / data.user.incidents_resolved) * 100);
-          }
-          
-          authStore.fetchMe();
-
-          // 🏆 ЛОВИМ НОВЫЕ АЧИВКИ!
-          if (data.user.new_achievements && data.user.new_achievements.length > 0) {
-            // Показываем первую полученную ачивку (если их несколько)
-            conductorState.showAchievementBanner(data.user.new_achievements[0]);
-          }
-        }
-        if (data.incident_result) this.passengerMood = data.incident_result.mood;
-        return data.incident_result;
-      } else {
-        console.error('Ошибка сервера при оценке голоса:', res.status);
-      }
-    } catch (err) {
-      console.error('Voice incident resolution error:', err);
-    } finally {
-      this.isStationEventLoading = false;
-    }
-    return null;
+  // --- Делегируем API-запросы ---
+  public async loadCabinManifest() { return this.api.loadCabinManifest(); }
+  public async startNewTripManifest() { return this.api.startNewTripManifest(); }
+  public async triggerStationEvent(stationIndex: number) { return this.api.triggerStationEvent(stationIndex); }
+  public async resolveIncident(incidentId: string, optionId: string) { return this.api.resolveIncident(incidentId, optionId); }
+  public async resolveVoiceIncident(incidentId: string, audioBlob: Blob | null, conductorText?: string, passengerPrompt?: string, expectedRule?: string) {
+    return this.api.resolveVoiceIncident(incidentId, audioBlob, conductorText, passengerPrompt, expectedRule);
   }
 }
 

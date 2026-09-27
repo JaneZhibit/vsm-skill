@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import TrainCabin from '../lib/components/TrainCabin.svelte';
+  import TrainCabin from '../lib/components/cabin/TrainCabin.svelte';
   import { startAmbient, stopAmbient } from '../lib/utils/audio';
   import { trainWorld } from '../lib/stores/trainWorld.svelte';
 

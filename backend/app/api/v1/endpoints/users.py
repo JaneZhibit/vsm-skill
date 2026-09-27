@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Query
-from app.core.database import get_user_by_id, get_user_achievements
+from app.core.db_queries import get_user_by_id, get_user_achievements
 
 router = APIRouter()
 

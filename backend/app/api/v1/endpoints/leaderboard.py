@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.core.database import get_leaderboard
+from app.core.db_queries import get_leaderboard
 
 router = APIRouter()
 

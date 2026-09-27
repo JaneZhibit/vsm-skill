@@ -2,7 +2,7 @@ import uuid
 from typing import Optional, Dict, Any
 from app.schemas.passenger import CabinManifestResponse, StationEventResponse
 from app.services.passenger_manager import PassengerManager
-from app.services.game_master import GameMaster
+from app.services.gm_orchestrator import GameMaster
 from app.services.trip_engine_utils import MAX_PASSENGERS
 
 class TripEngine:

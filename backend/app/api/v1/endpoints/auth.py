@@ -1,7 +1,7 @@
 from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from app.core.database import get_user_by_id
+from app.core.db_queries import get_user_by_id
 
 router = APIRouter()
 
