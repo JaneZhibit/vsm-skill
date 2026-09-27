@@ -3,7 +3,7 @@
   "title": "Пассажир с вейпом",
   "target_archetype": "male_young",
   "trigger": {
-    "type": "test",
+    "type": "orchestrator",
     "value": null,
     "parent_id": null,
     "delay_sec": 20,
@@ -11,9 +11,8 @@
   },
   "allowed_moods": [
     "neutral",
-    "vape_gadget",
     "vape_demanding",
-    "vape_annoyed"
+    "vape_gadget"
   ],
   "ambient_audio": "vape_sound.mp3",
   "is_passive": true,
