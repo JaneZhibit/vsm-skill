@@ -285,7 +285,7 @@
             </button>
 
             <!-- Обертка для анимации высоты через CSS -->
-            <div class="w-full bg-[#141210]/95 backdrop-blur-md border border-[#3d3831] rounded-xl rounded-t-none shadow-2xl flex flex-col relative z-10 transition-all duration-300 ease-in-out origin-bottom overflow-hidden {isInfoCollapsed ? 'max-h-0 opacity-0 border-none' : 'max-h-[100px] opacity-100 p-2.5 sm:p-3 border-t-0'}">
+            <div class="w-full bg-[#141210]/95 backdrop-blur-md border border-[#3d3831] rounded-xl rounded-t-none shadow-2xl flex flex-col relative z-10 transition-all duration-300 ease-in-out origin-top overflow-hidden {isInfoCollapsed ? 'max-h-0 opacity-0 border-none' : 'max-h-[100px] opacity-100 p-2.5 sm:p-3 border-t-0'}">
               <div class="flex justify-between items-center text-[10px] font-mono text-[#a39e95] uppercase font-semibold">
                 <span class="text-amber-400 bg-[#282420] px-1.5 py-0.5 rounded border border-[#3d3831]">🕒 {physicsState.formattedTime}</span>
                 <div class="text-center flex flex-col items-center leading-tight">
@@ -363,24 +363,14 @@
   .hud-top-bar > * { pointer-events: auto; }
   @media (min-width: 768px) { .hud-top-bar { top: 1.25rem; left: 1.5rem; right: 1.5rem; max-width: 96vw; margin: 0 auto; } }
 
-  .scene-scroll-area { flex: 1 1 0%; min-height: 0; width: 100%; overflow-x: auto; overflow-y: hidden; position: relative; display: flex; align-items: center; justify-content: flex-start; touch-action: pan-x; -webkit-overflow-scrolling: touch; }
-  @media (min-width: 768px) { .scene-scroll-area { flex: none; width: auto; height: auto; overflow: visible; justify-content: center; } }
-  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-  .hide-scrollbar::-webkit-scrollbar { display: none; }
+  .scene-scroll-area { flex: 1 1 0%; min-height: 0; width: 100%; position: relative; display: flex; align-items: center; justify-content: center; touch-action: none; background-color: #000; }
 
-  .scene-container { position: relative; display: inline-block; max-width: 96vw; max-height: 84vh; border-radius: 1rem; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8); background-color: #000; }
-  .base-image { display: block; max-height: 84vh; max-width: 96vw; width: auto; height: auto; object-fit: contain; user-select: none; }
-  .passenger-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
+  .scene-container { position: relative; width: 100%; max-width: 96vw; aspect-ratio: 1671 / 941; max-height: 84vh; border-radius: 1rem; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8); background-color: #000; }
+  .base-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; user-select: none; }
+  .passenger-overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; user-select: none; }
 
   @media (max-width: 767px) {
-    .scene-container { height: 100%; border-radius: 0; max-width: none; max-height: none; flex-shrink: 0; box-shadow: none; }
-    .scene-container.aisle-scene { width: 140vw; }
-    .scene-container.seat-scene { width: 180vw; transition: width 0.5s ease-in-out; }
-    .base-image { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover; object-position: center; }
-    .passenger-overlay { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover; object-position: center; }
-    .ambient-sway { animation: swayPan 14s ease-in-out infinite alternate; will-change: transform; }
-    .scene-scroll-area:active .ambient-sway { animation-play-state: paused; }
-    @keyframes swayPan { 0% { transform: translateX(-1.2%); } 100% { transform: translateX(1.2%); } }
+    .scene-container { max-width: 100vw; max-height: 100%; border-radius: 0; box-shadow: none; }
   }
 
   /* КОМПАКТНАЯ НИЖНЯЯ ПАНЕЛЬ */

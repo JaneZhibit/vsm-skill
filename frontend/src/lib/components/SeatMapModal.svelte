@@ -192,9 +192,9 @@
 {/if}
 
 <style>
-  .modal-backdrop { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: rgba(10, 9, 8, 0.85); backdrop-filter: blur(8px); padding: 0.5rem; }
+  .modal-backdrop { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: rgba(10, 9, 8, 0.85); backdrop-filter: blur(8px); padding: max(1rem, env(safe-area-inset-top)) 0.5rem max(1rem, env(safe-area-inset-bottom)) 0.5rem; }
 
-  .modal-card { width: 100%; max-width: 500px; max-height: 96vh; background: #141210; border: 1px solid #2d2924; border-radius: 1rem; overflow: hidden; }
+  .modal-card { width: 100%; max-width: 460px; max-height: 100%; background: #141210; border: 1px solid #2d2924; border-radius: 1rem; overflow: hidden; }
 
   .modal-header { padding: 0.75rem 1rem; background: #1a1816; border-bottom: 1px solid #2d2924; }
   .train-badge { display: flex; align-items: center; gap: 0.4rem; font-size: 0.6rem; color: #f59e0b; font-weight: bold; text-transform: uppercase; }
@@ -217,14 +217,14 @@
 
   .col-header { text-align: center; font-size: 0.8rem; font-weight: 800; color: #78716c; line-height: 1.1; margin-bottom: 0.25rem; }
 
-  .seat-btn { position: relative; height: 38px; display: flex; align-items: center; justify-content: center; background: #1a1816; border: 1px solid #2d2924; border-radius: 0.4rem; cursor: pointer; transition: all 0.1s; }
+  .seat-btn { position: relative; height: 32px; display: flex; align-items: center; justify-content: center; background: #1a1816; border: 1px solid #2d2924; border-radius: 0.4rem; cursor: pointer; transition: all 0.1s; }
   .seat-btn.occupied { background: #201d19; border-color: #3d3831; color: #d6d3d1; }
   .seat-btn.pending { border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.08); }
   .seat-btn.validated { border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.1); }
   .seat-btn.alert { border-color: #f43f5e; background: rgba(225, 29, 72, 0.25); animation: alertPulse 1.8s infinite; }
   .seat-btn.selected { border-color: #f59e0b; background: rgba(245, 158, 11, 0.25); box-shadow: 0 0 0 1px #f59e0b; color: white; transform: scale(1.05); z-index: 10; }
 
-  .seat-id { font-size: 0.7rem; font-weight: 700; font-family: ui-monospace, monospace; }
+  .seat-id { font-size: 0.65rem; font-weight: 700; font-family: ui-monospace, SFMono-Regular, monospace; }
   .seat-indicator-box { position: absolute; top: -6px; right: -6px; width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; }
 
   .scheme-legend { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; font-size: 0.6rem; color: #a8a29e; }
@@ -236,7 +236,7 @@
   .legend-box.selected { border-color: #f59e0b; background: #f59e0b; }
 
   .passenger-card { background: #0f0e0d; border: 1px solid #3d3831; border-radius: 0.75rem; padding: 0.75rem; width: 100%; }
-  .seat-big-tag { font-size: 1.5rem; font-weight: 900; color: white; font-family: ui-monospace, monospace; line-height: 1; }
+  .seat-big-tag { font-size: 1.5rem; font-weight: 900; color: white; font-family: ui-monospace, SFMono-Regular, monospace; line-height: 1; }
   .p-name { font-weight: 800; color: white; }
 
   .row-alert { color: #f43f5e !important; animation: alertPulseText 1.8s infinite; }
