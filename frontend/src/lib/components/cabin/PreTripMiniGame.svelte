@@ -3,23 +3,15 @@
   import { trainWorld } from '../../stores/trainWorld.svelte';
   import { playClickSound, playErrorSound, playSuccessSound } from '../../utils/audio';
 
+  // Устанавливаем статус поломки СРАЗУ при загрузке данных,
+  // чтобы избежать подмены картинок после первой отрисовки интерфейса.
   let items = $state([
-    { id: 'extinguisher', title: 'Огнетушитель (Пломба)', imgGood: '/assets/extinguisher_good.jpg', imgBad: '/assets/extinguisher_bad.jpg', isBroken: false, userSelection: null as boolean | null },
-    { id: 'toilet', title: 'Санитарный блок', imgGood: '/assets/toilet_good.jpg', imgBad: '/assets/toilet_bad.jpg', isBroken: false, userSelection: null as boolean | null },
-    { id: 'climate', title: 'Климат-контроль', imgGood: '/assets/climate_good.jpg', imgBad: '/assets/climate_bad.jpg', isBroken: false, userSelection: null as boolean | null },
+    { id: 'extinguisher', title: 'Огнетушитель (Пломба)', imgGood: '/assets/extinguisher_good.jpg', imgBad: '/assets/extinguisher_bad.jpg', isBroken: Math.random() > 0.6, userSelection: null as boolean | null },
+    { id: 'toilet', title: 'Санитарный блок', imgGood: '/assets/toilet_good.jpg', imgBad: '/assets/toilet_bad.jpg', isBroken: Math.random() > 0.6, userSelection: null as boolean | null },
+    { id: 'climate', title: 'Климат-контроль', imgGood: '/assets/climate_good.jpg', imgBad: '/assets/climate_bad.jpg', isBroken: Math.random() > 0.6, userSelection: null as boolean | null },
   ]);
 
   let currentIndex = $state(0);
-  let isChecking = $state(false);
-
-  $effect(() => {
-    if (!isChecking) {
-      isChecking = true;
-      items.forEach(item => {
-        item.isBroken = Math.random() > 0.6; // 40% шанс неисправности
-      });
-    }
-  });
 
   const currentItem = $derived(items[currentIndex]);
 

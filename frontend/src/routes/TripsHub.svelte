@@ -462,7 +462,7 @@
                   onclick={() => startLesson(lesson)}
                   class="w-full py-2.5 px-4 rounded-xl bg-[#282420] hover:bg-[#342f2a] border border-[#3d3831] hover:border-amber-400/60 text-xs font-bold text-[#f5f3ef] transition-all cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  <span>Повторить рейс</span>
+                  <span>Повторить (С подсказками)</span>
                   <span class="text-amber-400">↺</span>
                 </button>
               {:else if lesson.status === 'unlocked'}
@@ -470,8 +470,7 @@
                   onclick={() => startLesson(lesson)}
                   class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 text-xs font-bold tracking-wide shadow-md shadow-amber-500/25 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
                 >
-                  <span>В рейс (Начать)</span>
-                  <span>➔</span>
+                  <span>🎙️ Голосовой рейс (С подсказками)</span>
                 </button>
               {:else}
                 <button
@@ -497,7 +496,7 @@
     </div>
 
     <div class="p-5 sm:p-6 rounded-2xl border flex flex-col md:flex-row items-center justify-between gap-5 relative overflow-hidden bg-gradient-to-r from-[#2a1708] to-[#140b04] border-amber-500/50 shadow-[0_0_20px_rgba(245,158,11,0.15)]">
-      
+
       <div class="flex-1 space-y-2 relative z-10">
         <div class="flex items-center gap-2 flex-wrap">
           <span class="text-2xl">🎙️</span>
@@ -509,7 +508,7 @@
           </span>
         </div>
         <p class="text-xs text-[#a39e95] leading-relaxed max-w-2xl">
-          Сценарий будет сгенерирован ИИ-директором на основе ваших слабых зон ЗУН. Инциденты решаются только голосом. Пассажиры (ИИ) будут отвечать вам в реальном времени. Будьте вежливы и соблюдайте регламент!
+          Сценарий будет сгенерирован ИИ-директором на основе ваших слабых зон ЗУН. Инциденты решаются только голосом <strong class="text-rose-400">БЕЗ ПОДСКАЗОК</strong>. Пассажиры (ИИ) будут отвечать вам в реальном времени. Будьте вежливы и соблюдайте регламент!
         </p>
       </div>
 
@@ -517,7 +516,7 @@
         onclick={startVoiceExam}
         class="relative z-10 shrink-0 px-6 py-3.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-2 bg-gradient-to-r from-rose-600 via-orange-600 to-amber-500 hover:scale-105 text-white shadow-lg shadow-rose-500/30 cursor-pointer border border-rose-400/50"
       >
-        <span>🚀 Запустить PRO-рейс ➔</span>
+        <span>🔥 PRO-рейс (Без подсказок) ➔</span>
       </button>
     </div>
   </div>

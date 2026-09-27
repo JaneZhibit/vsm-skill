@@ -9,7 +9,7 @@
   import { playSuccessSound, playErrorSound, playClickSound } from '../utils/audio';
   import { voiceRecognition } from '../services/voiceRecognition.svelte';
 
-  type Stage = 'decision' | 'feedback' | 'learning_card';
+  type Stage = 'decision' | 'feedback';
 
   let currentSeat = $derived(cabinState.selectedSeat);
   let activeIncident = $derived(currentSeat?.activeIncident);
@@ -24,12 +24,9 @@
 
   // --- ЛОГИКА РЕЖИМОВ ---
   let isProMode = $derived(trainWorld.tripMode === 'pro');
-  let conductorGender = $derived(conductorState.conductorProfile.gender);
 
   let stage = $state<Stage>('decision');
   let timeLeft = $state<number>(0);
-  let selectedOption = $state<any>(null);
-  let pendingNextStep = $state<string | null>(null);
   let isTimeout = $state<boolean>(false);
   let timerInterval: ReturnType<typeof setInterval> | null = null;
   let feedbackResult = $state<any>(null);
@@ -40,27 +37,24 @@
   let formattedRecordTimer = $derived(`00:${voiceRecognition.recordingSeconds.toString().padStart(2, '0')}`);
   let passengerName = $derived(currentSeat?.isOccupied ? (currentSeat.passenger?.full_name || 'Пассажир') : 'Свободное место');
 
-  let dynamicOptions = $derived.by(() => {
-    let opts = currentStep?.options || currentIncident?.options || [];
-    if (!isProMode && currentIncident?.incident_id === 'inc_luggage_aisle_01' && conductorGender === 'f') {
-      if (!opts.find((o: any) => o.id === 'opt_ask_male')) {
-        opts = [...opts, {
-          id: 'opt_ask_male',
-          text: '«Мужчина, не могли бы вы помочь закинуть чемодан пассажиру?»',
-          action_type: 'click',
-          result: { loyalty_delta: 20, safety_delta: 30, mood: 'calm', feedback: "Отличная работа! Вы делегировали тяжелую физическую работу." }
-        }];
-      }
+  // УМНОЕ ИЗВЛЕЧЕНИЕ ПОДСКАЗКИ ДЛЯ БАЗОВОГО РЕЖИМА (Работает даже со старыми сценариями)
+  let currentHint = $derived.by(() => {
+    const inc = currentIncident as any;
+    if (inc?.expected_rule) return inc.expected_rule;
+    if (currentStep?.expected_rule) return currentStep.expected_rule;
+
+    // Если expected_rule нет, ищем правильный вариант ответа в старых кнопках и берем его текст/объяснение
+    const opts = currentStep?.options || inc?.options || [];
+    const correctOpt = opts.find((o: any) => (o.result?.loyalty_delta && o.result.loyalty_delta > 0) || o.why_correct);
+    if (correctOpt) {
+      return correctOpt.expected_rule || correctOpt.why_correct || `Рекомендуемое действие: ${correctOpt.text}`;
     }
-    return opts;
+    return 'Соблюдайте вежливое общение и стандарты безопасной перевозки пассажиров на ВСМ.';
   });
 
   let displayedText = $derived.by(() => {
-    // Теперь мы берем текст из feedbackResult ВСЕГДА, если он есть,
-    // чтобы пассажир не забывал свой последний аргумент при переключении обратно в микрофон!
     if (feedbackResult?.passenger_reply) return `«${feedbackResult.passenger_reply.replace(/^[«"]|[»"]$/g, '')}»`;
 
-    // В самом начале берем промпт из конфигурации
     const inc = currentIncident;
     if (inc) {
       const rawPrompt = currentStep?.prompt ?? inc?.prompt;
@@ -93,7 +87,7 @@
       currentStepId = activeIncident.start_step || 'step_1';
       timeLeft = currentStep?.timer_seconds || activeIncident.timer_seconds || 30;
       trainAudio.setAmbientDucking(true);
-      if (currentSeat?.passenger) cabinState.playPassengerDialog(activeIncident.incident_id, currentSeat.passenger.archetype_id, currentSeat.passenger.trait);
+      if (currentSeat?.passenger) trainWorld.playPassengerDialog(activeIncident.incident_id, currentSeat.passenger.archetype_id, currentSeat.passenger.trait);
       startTimer();
     }
   });
@@ -136,29 +130,6 @@
     feedbackResult = await cabinState.resolveIncident(currentIncident.incident_id, 'opt_timeout');
   }
 
-  async function executeOption(opt: any) {
-    if (opt.why_correct || opt.what_if_wrong) {
-      selectedOption = opt;
-      if (opt.next_step) {
-        stopTimer();
-        pendingNextStep = opt.next_step;
-        stage = 'learning_card';
-        playClickSound();
-        return;
-      }
-    }
-    if (opt.next_step) {
-      currentStepId = opt.next_step;
-      timeLeft = currentIncident?.steps?.[opt.next_step]?.timer_seconds || 30;
-      playClickSound();
-    } else {
-      stopTimer();
-      stage = 'feedback';
-      if (currentIncident?.incident_id) feedbackResult = await cabinState.resolveIncident(currentIncident.incident_id, opt.id);
-      if (feedbackResult?.loyalty_delta > 0 || feedbackResult?.is_passed) playSuccessSound(); else playErrorSound();
-    }
-  }
-
   // --- ГОЛОСОВЫЕ ДЕЙСТВИЯ ---
   function handleStartRecording() {
     stopTimer();
@@ -198,7 +169,8 @@
 
     try {
       const targetId = currentIncident?.incident_id || currentSeat?.id || 'free_talk';
-      const res = await cabinState.resolveVoiceIncident(targetId, null, text, displayedText, currentStep?.expected_rule || 'Вежливое общение');
+      // Передаем currentHint в качестве эталона для ИИ (чтобы ИИ судил ровно по той подсказке, что мы видим!)
+      const res = await cabinState.resolveVoiceIncident(targetId, null, text, displayedText, currentHint);
       if (fillerAudio) { fillerAudio.pause(); fillerAudio.currentTime = 0; }
 
       feedbackResult = res?.incident_result || res;
@@ -225,7 +197,6 @@
   onDestroy(resetDialogState);
 </script>
 
-<!-- ОСНОВНОЙ КОНТЕЙНЕР ДИАЛОГА -->
 <div class="vn-dialogue-box" transition:fly={{ y: 40, duration: 200 }}>
   {@render Header()}
 
@@ -242,15 +213,13 @@
   <div class="vn-actions-bar">
     {#if currentIncident || stage === 'feedback'}
       {#if stage === 'decision'}
-        {#if isProMode}{@render VoiceInterface()}{:else}{@render ChoicesInterface()}{/if}
-      {:else if stage === 'learning_card'}
-        {@render LearningCardInterface()}
+        {@render VoiceInterface()}
       {:else}
         {@render FeedbackInterface()}
       {/if}
     {:else}
-      <!-- СВОБОДНЫЙ ДИАЛОГ (FREE-TALK) С ПАССАЖИРОМ В ЛЮБОЙ МОМЕНТ -->
-      {#if currentSeat?.isOccupied && isProMode}
+      <!-- СВОБОДНЫЙ ДИАЛОГ (FREE-TALK) С ПАССАЖИРОМ -->
+      {#if currentSeat?.isOccupied}
         <div class="flex flex-col w-full gap-2">
           {@render VoiceInterface()}
           <div class="flex gap-2 justify-end pt-1 border-t border-[#3d3831]/50">
@@ -262,17 +231,12 @@
         </div>
       {:else}
         <div class="flex gap-2 justify-end">
-          {#if currentSeat?.isOccupied && currentSeat.ticketStatus !== 'validated'}
-            <button class="action-btn text-emerald-300" onclick={() => cabinState.validateCurrentSeat()}>📲 Проверить (АСКП)</button>
-          {/if}
           <button class="action-btn text-stone-400" onclick={() => cabinState.switchView('aisle')}>⬅ В проход</button>
         </div>
       {/if}
     {/if}
   </div>
 </div>
-
-<!-- ======================= СНИППЕТЫ SVELTE 5 ======================= -->
 
 {#snippet Header()}
   <div class="vn-speaker-bar">
@@ -281,8 +245,8 @@
       {#if currentSeat?.passenger?.trait}
         <span class="text-xs px-2 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/30">Характер: {currentSeat.passenger.trait}</span>
       {/if}
-      <span class="text-[10px] font-mono px-2 py-0.5 rounded border {isProMode ? 'bg-rose-950/60 text-rose-300 border-rose-500/50' : 'bg-emerald-950/60 text-emerald-300 border-emerald-500/50'}">
-        {isProMode ? '🔥 PRO (Голос)' : '🎓 Обучение (Кнопки)'}
+      <span class="text-[10px] font-mono px-2 py-0.5 rounded border {isProMode ? 'bg-rose-950/60 text-rose-300 border-rose-500/50' : 'bg-indigo-950/60 text-indigo-300 border-indigo-500/50'}">
+        {isProMode ? '🔥 PRO (Без подсказок)' : '🎓 БАЗА (С подсказками)'}
       </span>
     </div>
     {#if currentIncident && stage === 'decision'}
@@ -293,6 +257,15 @@
 
 {#snippet VoiceInterface()}
   <div class="flex flex-col items-center gap-2.5 py-2 w-full">
+
+    <!-- ПОДСКАЗКА В БАЗОВОМ РЕЖИМЕ -->
+    {#if !isProMode && stage === 'decision' && currentHint}
+      <div class="w-full p-2.5 mb-1 bg-indigo-950/40 border border-indigo-500/40 rounded-lg text-indigo-200 text-xs shadow-inner text-left" transition:fade={{duration: 200}}>
+        <span class="font-bold text-indigo-400 block mb-0.5">💡 Подсказка (Как правильно ответить):</span>
+        {currentHint}
+      </div>
+    {/if}
+
     <div class="text-xs text-[#a39e95] text-center w-full">
       {#if voiceRecognition.micError}
         <span class="text-rose-400 font-bold">{voiceRecognition.micError}</span>
@@ -337,35 +310,6 @@
         <button onclick={submitEditedText} class="px-6 py-2 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-[0_0_15px_rgba(16,185,129,0.4)] flex items-center gap-1.5">🚀 Отправить ИИ</button>
       {/if}
     </div>
-  </div>
-{/snippet}
-
-{#snippet ChoicesInterface()}
-  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-    {#each dynamicOptions as opt, idx}
-      <button onclick={() => executeOption(opt)} class="text-left p-2.5 rounded-lg bg-[#201d19] border border-[#3d3831] hover:border-amber-400 hover:bg-[#2b2621] text-xs text-[#f5f3ef] transition-colors flex gap-2">
-        <span class="font-bold text-amber-500">[{idx + 1}]</span> <span>{opt.text}</span>
-      </button>
-    {/each}
-  </div>
-{/snippet}
-
-{#snippet LearningCardInterface()}
-  <div class="flex flex-col gap-2 p-1" in:fade={{ duration: 150 }}>
-    <div class="text-xs font-bold text-amber-400 border-b border-[#3d3831] pb-1">💡 Разбор (Без штрафов)</div>
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      {#if selectedOption?.why_correct}
-        <div class="bg-emerald-950/40 border border-emerald-500/30 rounded-lg p-2 text-xs text-emerald-200">
-          <span class="font-bold block mb-1">✅ Почему это верно:</span>{selectedOption.why_correct}
-        </div>
-      {/if}
-      {#if selectedOption?.what_if_wrong}
-        <div class="bg-rose-950/30 border border-rose-500/25 rounded-lg p-2 text-xs text-rose-200">
-          <span class="font-bold block mb-1">⚠️ Если ошибиться:</span>{selectedOption.what_if_wrong}
-        </div>
-      {/if}
-    </div>
-    <button class="self-end px-4 py-1.5 bg-amber-500 text-black font-bold text-xs rounded" onclick={() => { currentStepId = pendingNextStep!; pendingNextStep = null; stage = 'decision'; timeLeft = currentIncident?.steps?.[currentStepId]?.timer_seconds || 30; startTimer(); }}>Далее ➔</button>
   </div>
 {/snippet}
 

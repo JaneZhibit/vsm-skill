@@ -1,7 +1,7 @@
 import { startAmbient, stopAmbient, playCallBell } from '../utils/audio';
 
 export class TrainAudioStore {
-  isAudioMuted = $state<boolean>(true);
+  isAudioMuted = $state<boolean>(false);
   dialogDurationMs = $state<number>(0);
 
   // Канал 1: Речь пассажира (TTS)

@@ -2,12 +2,13 @@
   import { onMount, onDestroy } from 'svelte';
   import TrainCabin from '../lib/components/cabin/TrainCabin.svelte';
   import { startAmbient, stopAmbient } from '../lib/utils/audio';
-  import { trainWorld } from '../lib/stores/trainWorld.svelte';
+  import { trainAudio } from '../lib/stores/trainAudio.svelte';
+  import { cabinState } from '../lib/stores/cabinState.svelte';
 
   onMount(() => {
-    trainWorld.isAudioMuted = false;
+    trainAudio.isAudioMuted = false; // Принудительно убеждаемся, что звук включен
     startAmbient();
-    trainWorld.loadCabinManifest();
+    cabinState.loadCabinManifest();
   });
 
   onDestroy(() => {
