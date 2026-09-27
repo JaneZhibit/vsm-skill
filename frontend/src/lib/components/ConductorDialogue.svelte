@@ -22,7 +22,7 @@
   let isEditingVoice = $state<boolean>(false);
   let editableTranscript = $state<string>('');
 
-  // Новое состояние для сворачивания панели
+  // Состояние сворачивания панели
   let isCollapsed = $state<boolean>(false);
 
   // --- ЛОГИКА РЕЖИМОВ ---
@@ -168,7 +168,7 @@
 
       feedbackResult = res?.incident_result || res;
       stage = 'feedback';
-      isCollapsed = false; // Разворачиваем, чтобы показать результат
+      isCollapsed = false;
 
       if (feedbackResult?.loyalty_delta >= 0 || feedbackResult?.is_passed) playSuccessSound(); else playErrorSound();
 
@@ -193,35 +193,44 @@
 </script>
 
 <div class="vn-dialogue-box" transition:fly={{ y: 40, duration: 200 }}>
-  <!-- ШАПКА ДИАЛОГА -->
-  <div class="vn-speaker-bar flex-col sm:flex-row gap-2">
-    <div class="flex items-center gap-2 flex-wrap flex-1">
-      <span class="text-sm font-bold text-[#f5f3ef]">👤 Место {currentSeat?.id || '—'}</span>
-      {#if currentSeat?.passenger?.trait}
-        <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/30">{currentSeat.passenger.trait}</span>
-      {/if}
-      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded border {isProMode ? 'bg-rose-950/60 text-rose-300 border-rose-500/50' : 'bg-indigo-950/60 text-indigo-300 border-indigo-500/50'}">
-        {isProMode ? 'PRO' : 'БАЗА'}
-      </span>
-      {#if currentIncident && stage === 'decision'}
-        <span class="text-xs font-bold px-2 py-0.5 rounded border {timeLeft <= 3 ? 'bg-rose-900/30 text-rose-400 border-rose-500 animate-pulse' : 'bg-amber-900/20 text-amber-400 border-amber-500'}">
-          ⏱️ {formattedSeconds} с
-        </span>
-      {/if}
-    </div>
 
-    <!-- Кнопки управления окном -->
-    <div class="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
-      {#if !currentIncident && currentSeat?.ticketStatus !== 'validated'}
-        <button class="px-2 py-1 rounded bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-xs font-bold" onclick={() => cabinState.validateCurrentSeat()}>📲 АСКП</button>
-      {/if}
-      <button onclick={() => {playClickSound(); isCollapsed = !isCollapsed;}} class="px-2 py-1 rounded bg-[#282420] text-stone-300 text-xs font-bold border border-[#3d3831] whitespace-nowrap">
-        {isCollapsed ? '▲ Развернуть' : '▼ Свернуть'}
-      </button>
-      <button onclick={() => {playClickSound(); cabinState.switchView('aisle');}} class="px-2 py-1 rounded bg-[#282420] hover:bg-rose-950 hover:text-rose-300 text-stone-300 text-xs font-bold border border-[#3d3831] whitespace-nowrap">
-        ⬅ В проход
-      </button>
+  <!-- СМАРТ-ШАПКА (Она же кнопка разворачивания, если свернуто) -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="vn-speaker-bar {isCollapsed ? 'cursor-pointer hover:bg-white/5 rounded-t-lg' : ''}" onclick={() => { if(isCollapsed) { playClickSound(); isCollapsed = false; } }}>
+    <div class="flex items-start justify-between w-full gap-2">
+      <!-- Информация слева -->
+      <div class="flex items-center gap-1.5 flex-wrap flex-1">
+        <span class="text-xs sm:text-sm font-bold text-[#f5f3ef] whitespace-nowrap">👤 {currentSeat?.id || '—'}</span>
+        {#if currentSeat?.passenger?.trait}
+          <span class="text-[9px] px-1 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/30 leading-none">{currentSeat.passenger.trait}</span>
+        {/if}
+        <span class="text-[9px] font-mono px-1 py-0.5 rounded border leading-none {isProMode ? 'bg-rose-950/60 text-rose-300 border-rose-500/50' : 'bg-indigo-950/60 text-indigo-300 border-indigo-500/50'}">
+          {isProMode ? 'PRO' : 'БАЗА'}
+        </span>
+        {#if currentIncident && stage === 'decision'}
+          <span class="text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none mt-0.5 sm:mt-0 {timeLeft <= 3 ? 'bg-rose-900/30 text-rose-400 border-rose-500 animate-pulse' : 'bg-amber-900/20 text-amber-400 border-amber-500'}">
+            ⏱️ {formattedSeconds}с
+          </span>
+        {/if}
+      </div>
+
+      <!-- Кнопки справа -->
+      <div class="flex items-center gap-1.5 shrink-0">
+        {#if !currentIncident && currentSeat?.ticketStatus !== 'validated'}
+          <button class="px-2 py-1 rounded bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold h-7" onclick={(e) => { e.stopPropagation(); cabinState.validateCurrentSeat(); }}>АСКП</button>
+        {/if}
+        <button onclick={(e) => { e.stopPropagation(); playClickSound(); cabinState.switchView('aisle'); }} class="px-2 py-1 rounded bg-[#282420] text-stone-300 text-[10px] font-bold border border-[#3d3831] whitespace-nowrap h-7">
+          ⬅ В проход
+        </button>
+        <button onclick={(e) => { e.stopPropagation(); playClickSound(); isCollapsed = !isCollapsed; }} class="w-7 h-7 flex items-center justify-center rounded bg-[#282420] text-stone-300 text-xs font-bold border border-[#3d3831]">
+          {isCollapsed ? '▲' : '▼'}
+        </button>
+      </div>
     </div>
+    {#if isCollapsed}
+      <div class="text-center text-[10px] text-amber-500/70 mt-1.5 font-medium animate-pulse">Нажмите сюда, чтобы развернуть диалог</div>
+    {/if}
   </div>
 
   <!-- СВОРАЧИВАЕМАЯ ОБЛАСТЬ -->
@@ -359,7 +368,7 @@
   @media (min-width: 768px) {
     .vn-dialogue-box { border-radius: 1rem; padding-bottom: 0.75rem; box-shadow: 0 10px 30px rgba(0,0,0,0.7); }
   }
-  .vn-speaker-bar { display: flex; justify-content: space-between; border-bottom: 1px solid rgba(61, 56, 49, 0.5); padding-bottom: 0.4rem; }
+  .vn-speaker-bar { border-bottom: 1px solid rgba(61, 56, 49, 0.5); padding-bottom: 0.4rem; transition: background-color 0.2s; }
   .vn-speech-area { background: rgba(26, 24, 22, 0.6); border: 1px solid rgba(61, 56, 49, 0.5); border-radius: 0.5rem; padding: 0.5rem; min-height: 2.5rem; }
   .speech-quote { font-style: italic; color: #f5f3ef; font-size: 0.8125rem; margin: 0; }
   @media (min-width: 768px) { .speech-quote { font-size: 0.875rem; } }

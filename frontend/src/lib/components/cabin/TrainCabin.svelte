@@ -369,7 +369,7 @@
   .left-arrow { left: 0.5rem; }
   .right-arrow { right: 0.5rem; }
 
-  /* АДАПТИВНЫЙ ФОН КАБИНЫ (60vh НА ТЕЛЕФОНАХ) */
+  /* АДАПТИВНЫЙ ФОН КАБИНЫ */
   .scene-scroll-area { flex: 1 1 0%; min-height: 0; width: 100%; overflow-x: auto; overflow-y: hidden; position: relative; display: flex; align-items: center; justify-content: flex-start; touch-action: pan-x; -webkit-overflow-scrolling: touch; background-color: #050505; }
   .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -379,20 +379,24 @@
   .passenger-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
 
   @media (max-width: 767px) {
-    .scene-scroll-area { position: absolute; top: 18vh; height: 58vh; width: 100vw; align-items: flex-start; }
+    /* На телефонах: отступ сверху 10vh, высота 60vh. Оставшиеся 30vh под UI */
+    .scene-scroll-area { position: absolute; top: 10vh; height: 60vh; width: 100vw; align-items: flex-start; }
     .scene-container { height: 100%; max-height: none; max-width: none; width: auto; aspect-ratio: 1671 / 941; border-radius: 0; box-shadow: none; flex-shrink: 0; }
     .base-image { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: fill; }
     .passenger-overlay { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: fill; }
+    .ambient-sway { animation: swayPan 14s ease-in-out infinite alternate; will-change: transform; }
+    .scene-scroll-area:active .ambient-sway { animation-play-state: paused; }
+    @keyframes swayPan { 0% { transform: translateX(-1.2%); } 100% { transform: translateX(1.2%); } }
   }
 
-  /* КОМПАКТНАЯ НИЖНЯЯ ПАНЕЛЬ */
-  .bottom-ui-panel { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 48rem; z-index: 50; display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+  /* КОМПАКТНАЯ НИЖНЯЯ ПАНЕЛЬ С ОТСТУПАМИ (PB-6) */
+  .bottom-ui-panel { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 48rem; z-index: 50; display: flex; flex-direction: column; align-items: center; pointer-events: none; padding-bottom: max(1.5rem, env(safe-area-inset-bottom)); }
 
-  /* Универсальная кнопка действия */
-  .main-action-btn { width: 100%; max-width: 24rem; padding: 0.75rem 1.25rem; border-radius: 1rem; font-weight: 800; font-size: 0.875rem; color: #fff; background-image: linear-gradient(to right, var(--tw-gradient-stops)); border-width: 1px; box-shadow: 0 10px 20px -5px rgba(0,0,0,0.5); cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+  /* Универсальная кнопка действия (с добавлением боковых паддингов) */
+  .main-action-btn { width: calc(100% - 2rem); margin: 0 auto; max-width: 24rem; padding: 0.75rem 1.25rem; border-radius: 1rem; font-weight: 800; font-size: 0.875rem; color: #fff; background-image: linear-gradient(to right, var(--tw-gradient-stops)); border-width: 1px; box-shadow: 0 10px 20px -5px rgba(0,0,0,0.5); cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
   .main-action-btn:active { transform: scale(0.98); }
 
-  .dialogue-wrapper { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 54rem; z-index: 30; pointer-events: none; }
+  .dialogue-wrapper { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 54rem; z-index: 30; pointer-events: none; padding-bottom: max(1.5rem, env(safe-area-inset-bottom)); }
   @media (max-width: 767px) { .dialogue-wrapper { pointer-events: auto; } }
 
   /* Остальные классы HUD */
