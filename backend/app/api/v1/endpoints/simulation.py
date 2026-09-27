@@ -12,7 +12,7 @@ from app.schemas.passenger import (
 )
 from app.services.trip_engine import trip_manager
 from app.services.route_stations import ROUTE_STATIONS
-from app.services.scenarios import get_scenario_result, SCENARIOS_DB
+from app.services.scenarios import get_scenario_result, SCENARIOS_DB, SCENARIOS_DIR
 from app.services.polza_service import polza_ai
 
 router = APIRouter()
@@ -173,34 +173,59 @@ class CustomLiveScenarioPayload(BaseModel):
     expected_rule: str     # Что должен сказать проводник (для оценки LLM)
     skills: List[str] = [] # ["safety", "service", "discipline", "medicine"]
 
-# Глобальный реестр пользовательских живых сценариев
-LIVE_SCENARIOS_DB = {}
+# Глобальный реестр пользовательских живых сценариев (с автозагрузкой из SCENARIOS_DB)
+LIVE_SCENARIOS_DB = {
+    k: v for k, v in SCENARIOS_DB.items() if "trigger" in v or "ai_persona" in v or "llm_system_prompt" in v
+}
 
 @router.get("/custom-live-scenario")
 async def get_live_scenarios():
-    """Отдает список всех созданных событий для связывания."""
-    return [{"id": k, "title": v.get("title", k)} for k, v in LIVE_SCENARIOS_DB.items()]
+    """Отдает список всех созданных событий для связывания и отображения в Студии."""
+    result = []
+    for k, v in LIVE_SCENARIOS_DB.items():
+        result.append({
+            "id": k,
+            "title": v.get("title", k),
+            "target_archetype": v.get("target_archetype", "any"),
+            "trigger": v.get("trigger", {}),
+            "passenger_state": v.get("passenger_state", "neutral"),
+            "ambient_audio": v.get("ambient_audio"),
+            "is_passive": v.get("is_passive", False),
+            "skills": v.get("skills", []),
+            "expected_rule": v.get("expected_rule") or v.get("steps", {}).get("step_1", {}).get("expected_rule", ""),
+            "llm_system_prompt": v.get("llm_system_prompt", ""),
+        })
+    return result
 
 @router.post("/custom-live-scenario")
 async def create_live_scenario(payload: CustomLiveScenarioPayload):
-    """No-Code редактор живых (эмерджентных) ситуаций."""
+    """No-Code редактор живых (эмерджентных) ситуаций с персистентным сохранением."""
     import time
+    import json
     inc_id = payload.incident_id or f"evt_{int(time.time()*1000)}"
     data = payload.model_dump()
     data["incident_id"] = inc_id
     passenger_state = payload.passenger_state or (payload.allowed_moods[0] if payload.allowed_moods else "neutral")
     data["passenger_state"] = passenger_state
-    LIVE_SCENARIOS_DB[inc_id] = data
-    SCENARIOS_DB[inc_id] = {
+
+    trigger_data = payload.trigger.model_dump() if hasattr(payload.trigger, "model_dump") else payload.trigger
+
+    scenario_entry = {
         "incident_id": inc_id,
         "title": payload.title,
-        "phase": "passive" if payload.is_passive else "urgent",
-        "passenger_state_during": passenger_state,
-        "ai_persona": payload.llm_system_prompt,
-        "start_step": "step_1",
-        "skills": payload.skills,
+        "target_archetype": payload.target_archetype,
+        "trigger": trigger_data,
         "allowed_moods": payload.allowed_moods,
         "ambient_audio": payload.ambient_audio,
+        "is_passive": payload.is_passive,
+        "skills": payload.skills,
+        "llm_system_prompt": payload.llm_system_prompt,
+        "expected_rule": payload.expected_rule,
+        "phase": "passive" if payload.is_passive else "urgent",
+        "passenger_state_during": passenger_state,
+        "passenger_state": passenger_state,
+        "ai_persona": payload.llm_system_prompt,
+        "start_step": "step_1",
         "steps": {
             "step_1": {
                 "prompt": payload.llm_system_prompt,
@@ -210,7 +235,33 @@ async def create_live_scenario(payload: CustomLiveScenarioPayload):
             }
         }
     }
+
+    LIVE_SCENARIOS_DB[inc_id] = scenario_entry
+    SCENARIOS_DB[inc_id] = scenario_entry
+
+    # Сохраняем сценарий на диск для персистентности между перезапусками
+    try:
+        SCENARIOS_DIR.mkdir(parents=True, exist_ok=True)
+        file_path = SCENARIOS_DIR / f"{inc_id}.json"
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(scenario_entry, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Failed to persist scenario {inc_id}: {e}")
+
     return {"status": "created", "incident_id": inc_id}
+
+@router.delete("/custom-live-scenario/{incident_id}")
+async def delete_live_scenario(incident_id: str):
+    """Удаляет созданный сценарий из реестра и с диска."""
+    LIVE_SCENARIOS_DB.pop(incident_id, None)
+    SCENARIOS_DB.pop(incident_id, None)
+    file_path = SCENARIOS_DIR / f"{incident_id}.json"
+    if file_path.exists():
+        try:
+            file_path.unlink()
+        except Exception as e:
+            print(f"Failed to delete file {file_path}: {e}")
+    return {"status": "deleted", "incident_id": incident_id}
 
 @router.post("/upload-ambient-audio")
 async def upload_ambient_audio(file: UploadFile = File(...)):

@@ -91,7 +91,7 @@ def get_frontend_incident_data(incident_id: str) -> Optional[Dict[str, Any]]:
 
     return {
         "incident_id": incident_id,
-        "title": incident["title"],
+        "title": incident.get("title", incident_id),
         "phase": incident.get("phase", "learning"),
         "start_step": incident.get("start_step", "step_1"),
         "ambient_audio": incident.get("ambient_audio"),

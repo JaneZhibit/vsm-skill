@@ -11,6 +11,25 @@ from app.services.scenarios import SCENARIOS_DB
 class TestTripEngine(unittest.TestCase):
     def setUp(self):
         self.engine = TripEngine()
+        # Регистрируем тестовые сценарии для проверки движка независимо от файлов на диске
+        for i in range(1, 5):
+            SCENARIOS_DB[f"test_inc_{i}"] = {
+                "incident_id": f"test_inc_{i}",
+                "title": f"Тестовый инцидент {i}",
+                "start_step": "step_1",
+                "steps": {
+                    "step_1": {
+                        "prompt": "Проблема",
+                        "options": [
+                            {
+                                "id": "opt_1",
+                                "text": "Решить",
+                                "result": {"mood": "calm", "loyalty_delta": 20, "safety_delta": 20}
+                            }
+                        ]
+                    }
+                }
+            }
 
     def test_new_trip_generation(self):
         """Проверка инициализации рейса: пустой вагон при приемке, затем 13-18 пассажиров при посадке."""
@@ -74,14 +93,14 @@ class TestTripEngine(unittest.TestCase):
     def test_multi_step_scenario(self):
         """Проверка структуры и резолва инцидентов СТО РЖД с двойной шкалой."""
         from app.services.scenarios import get_scenario_result, get_frontend_incident_data
-        data = get_frontend_incident_data("inc_ebs_01")
+        data = get_frontend_incident_data("test_inc_1")
         self.assertIsNotNone(data)
         self.assertEqual(data["start_step"], "step_1")
         self.assertIn("steps", data)
         self.assertIn("step_1", data["steps"])
 
         # Проверка резолва опции с safety_delta
-        res = get_scenario_result("inc_ebs_01", "opt_1")
+        res = get_scenario_result("test_inc_1", "opt_1")
         self.assertIsNotNone(res)
         self.assertEqual(res["mood"], "calm")
         self.assertEqual(res["loyalty_delta"], 20)
@@ -89,7 +108,7 @@ class TestTripEngine(unittest.TestCase):
 
     def test_generate_timeline(self):
         """Проверка генерации таймлайна (4 инцидента по маршруту)."""
-        tl = self.engine.generate_timeline(mode="level_1")
+        tl = self.engine.generate_timeline(mode="pro")
         self.assertTrue(len(tl) > 0)
         incidents = [ev for ev in tl if ev["type"] == "incident"]
         self.assertEqual(len(incidents), 4)

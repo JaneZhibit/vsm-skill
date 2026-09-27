@@ -44,75 +44,6 @@ class GameMaster:
         except Exception as e:
             print(f"Error loading LIVE_SCENARIOS_DB: {e}")
 
-        # 2. Базовые встроенные триггеры (по времени и цепочке)
-        self.active_triggers.extend([
-            {
-                "id": "trig_drunk",
-                "incident_id": "live_drunk",
-                "action": "builtin",
-                "phase": "passive",
-                "payload": {
-                    "incident_id": "live_drunk",
-                    "trigger": {"type": "time", "value": 100},
-                    "target_archetype": "male_young",
-                    "passenger_state": "drunk",
-                    "is_passive": True
-                }
-            },
-            {
-                "id": "trig_crying",
-                "incident_id": "live_crying_child",
-                "action": "builtin",
-                "phase": "ambient",
-                "payload": {
-                    "incident_id": "live_crying_child",
-                    "trigger": {"type": "time", "value": 360},
-                    "target_archetype": "female_young",
-                    "passenger_state": "annoyed",
-                    "is_passive": False
-                }
-            },
-            {
-                "id": "trig_neighbor_complaint",
-                "incident_id": "live_neighbor_complaint",
-                "action": "builtin",
-                "phase": "urgent",
-                "payload": {
-                    "incident_id": "live_neighbor_complaint",
-                    "trigger": {"type": "chained", "parent_id": "live_crying_child", "delay_sec": 60},
-                    "target_archetype": "any",
-                    "passenger_state": "annoyed",
-                    "is_passive": False
-                }
-            },
-            {
-                "id": "trig_tea",
-                "incident_id": "live_spilled_tea",
-                "action": "builtin",
-                "phase": "urgent",
-                "payload": {
-                    "incident_id": "live_spilled_tea",
-                    "trigger": {"type": "time", "value": 1080},
-                    "target_archetype": "any",
-                    "passenger_state": "annoyed",
-                    "is_passive": False
-                }
-            },
-            {
-                "id": "trig_vaper",
-                "incident_id": "live_vaper",
-                "action": "builtin",
-                "phase": "urgent",
-                "payload": {
-                    "incident_id": "live_vaper",
-                    "trigger": {"type": "time", "value": 1920},
-                    "target_archetype": "male_young",
-                    "passenger_state": "annoyed",
-                    "is_passive": False
-                }
-            },
-        ])
-
     def generate_timeline(self, mode: str = "pro", user: Optional[Dict[str, Any]] = None) -> dict:
         self.current_mode = mode
         user = user or {}
@@ -157,20 +88,21 @@ class GameMaster:
         start_phase = "initial_round"
         self.init_triggers(mode=mode, start_time=start_time_sec)
 
-        # Контрольные точки для таймлайна (требуются для расписания поездки и тестов)
+        # Контрольные точки для таймлайна (требуются для расписания поездки)
         pool = list(SCENARIOS_DB.keys())
-        random.shuffle(pool)
-        selected_incidents = pool[:4]
+        if pool:
+            random.shuffle(pool)
+            selected_incidents = pool[:4]
 
-        checkpoints_sec = [50880, 52200, 54240, 55920]
-        for idx, inc_id in enumerate(selected_incidents):
-            timeline.append({
-                "id": f"pro_inc_{idx}",
-                "type": "incident",
-                "timeSec": checkpoints_sec[idx] if idx < len(checkpoints_sec) else 51000 + idx * 1200,
-                "timeStr": f"14:{10 + idx * 15}:00",
-                "payload": inc_id,
-            })
+            checkpoints_sec = [50880, 52200, 54240, 55920]
+            for idx, inc_id in enumerate(selected_incidents):
+                timeline.append({
+                    "id": f"pro_inc_{idx}",
+                    "type": "incident",
+                    "timeSec": checkpoints_sec[idx] if idx < len(checkpoints_sec) else 51000 + idx * 1200,
+                    "timeStr": f"14:{10 + idx * 15}:00",
+                    "payload": inc_id,
+                })
 
         return {"timeline": timeline, "start_time": start_time_sec, "start_phase": start_phase}
 
@@ -367,7 +299,10 @@ class GameMaster:
             return
 
         target_seat = random.choice(occupied)
-        incident_id = force_incident or random.choice(list(SCENARIOS_DB.keys()))
+        keys = list(SCENARIOS_DB.keys())
+        if not force_incident and not keys:
+            return
+        incident_id = force_incident or random.choice(keys)
         incident_data = get_frontend_incident_data(incident_id)
 
         if incident_data:

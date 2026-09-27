@@ -177,5 +177,8 @@ class TestChainedAndUpload(unittest.TestCase):
         self.assertEqual(seat.active_incident.ambient_audio, "vape_hiss.mp3")
         self.assertIn(seat.passenger.state, ["vaping_calm", "vaping_angry"])
 
+        # Очищаем тестовый сценарий
+        self.client.delete(f"/api/v1/simulation/custom-live-scenario/{inc_id}")
+
 if __name__ == "__main__":
     unittest.main()

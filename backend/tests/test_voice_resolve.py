@@ -24,7 +24,40 @@ class TestVoiceExamAndPolza(unittest.IsolatedAsyncioTestCase):
 
     def test_frontend_data_preserves_learning_and_voice(self):
         """Проверка передачи phase, expected_rule, why_correct, what_if_wrong на фронт."""
-        data_voice = get_frontend_incident_data("inc_voice_exam_01")
+        from app.services.scenarios import SCENARIOS_DB
+        SCENARIOS_DB["test_voice_exam"] = {
+            "incident_id": "test_voice_exam",
+            "title": "Тестовый голосовой экзамен",
+            "phase": "voice_exam",
+            "start_step": "step_voice",
+            "steps": {
+                "step_voice": {
+                    "action_type": "voice",
+                    "expected_rule": "Правило",
+                    "prompt": "Вопрос",
+                    "options": []
+                }
+            }
+        }
+        SCENARIOS_DB["test_learning"] = {
+            "incident_id": "test_learning",
+            "title": "Тестовое обучение",
+            "phase": "learning",
+            "start_step": "step_1",
+            "steps": {
+                "step_1": {
+                    "prompt": "Вопрос",
+                    "options": [{
+                        "id": "opt_1",
+                        "text": "Ответ",
+                        "why_correct": "Потому что верно",
+                        "what_if_wrong": "Опасно"
+                    }]
+                }
+            }
+        }
+
+        data_voice = get_frontend_incident_data("test_voice_exam")
         self.assertIsNotNone(data_voice)
         self.assertEqual(data_voice["phase"], "voice_exam")
         self.assertIn("step_voice", data_voice["steps"])
@@ -32,7 +65,7 @@ class TestVoiceExamAndPolza(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(step["action_type"], "voice")
         self.assertTrue(len(step["expected_rule"]) > 0)
 
-        data_learning = get_frontend_incident_data("inc_wrong_seat_01")
+        data_learning = get_frontend_incident_data("test_learning")
         self.assertIsNotNone(data_learning)
         self.assertEqual(data_learning["phase"], "learning")
         step_1 = data_learning["steps"]["step_1"]

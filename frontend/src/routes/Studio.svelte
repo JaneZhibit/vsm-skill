@@ -54,15 +54,30 @@
   let previewArchetype = $derived(targetArchetype === 'any' ? 'male_young' : targetArchetype);
   let previewImageUrl = $derived(`/assets/${previewArchetype}/${activePreviewMood}.png`);
 
-  onMount(async () => {
-    // Загружаем список существующих событий для "Цепной реакции"
+  async function loadExistingScenarios() {
     try {
       const res = await fetch('/api/v1/simulation/custom-live-scenario');
       if (res.ok) {
         existingScenarios = await res.json();
       }
     } catch {}
-  });
+  }
+
+  onMount(loadExistingScenarios);
+
+  async function deleteScenario(id: string) {
+    if (!confirm('Вы уверены, что хотите удалить это событие?')) return;
+    playClickSound();
+    try {
+      const res = await fetch(`/api/v1/simulation/custom-live-scenario/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        existingScenarios = existingScenarios.filter(s => s.id !== id);
+        playSuccessSound();
+      }
+    } catch {
+      playErrorSound();
+    }
+  }
 
   // Загрузка своего аудио
   async function handleAudioUpload(e: Event) {
@@ -159,8 +174,10 @@
           ? 'Тестовое событие готово! Запустите PRO-Рейс, оно сработает по таймеру.'
           : 'Событие добавлено в пул GameMaster!';
         
-        const json = await res.json();
-        existingScenarios = [...existingScenarios, { id: json.incident_id || payload.incident_id, title: payload.title }];
+        await loadExistingScenarios();
+        customTitle = '';
+        llmSystemPrompt = '';
+        expectedRule = '';
       } else {
         throw new Error(`Ошибка: ${res.status}`);
       }
@@ -182,6 +199,9 @@
     <div class="bg-[#1a1816] p-1 rounded-xl border border-[#2d2924] inline-flex gap-1">
       <button onclick={() => { activeTab = 'constructor'; playClickSound(); }} class="px-3.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all {activeTab === 'constructor' ? 'bg-amber-950/40 text-amber-300 border border-amber-500/60 shadow-sm' : 'text-[#a39e95]'}">
         ⚙️ Event-Конструктор
+      </button>
+      <button onclick={() => { activeTab = 'cases'; playClickSound(); }} class="px-3.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all {activeTab === 'cases' ? 'bg-amber-950/40 text-amber-300 border border-amber-500/60 shadow-sm' : 'text-[#a39e95]'}">
+        📋 Мои события ({existingScenarios.length})
       </button>
       <button onclick={() => { activeTab = 'handbook'; playClickSound(); }} class="px-3.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all {activeTab === 'handbook' ? 'bg-[#282420] text-amber-300 border border-[#3d3831] shadow-sm' : 'text-[#a39e95]'}">
         База знаний
@@ -407,6 +427,77 @@
       <button onclick={handleSaveScenario} disabled={isSaving} class="px-8 py-3.5 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-500 hover:from-amber-500 text-stone-950 font-bold text-sm tracking-wide shadow-lg shadow-amber-500/20 cursor-pointer transition-all flex items-center gap-2 hover:scale-105 active:scale-95 disabled:opacity-50">
         <span>{isSaving ? '⏳ Добавление...' : '💾 Зарегистрировать событие'}</span>
       </button>
+    </div>
+  {:else if activeTab === 'cases'}
+    <div class="space-y-4">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-[#141210] p-4 rounded-xl border border-[#2d2924]">
+        <div>
+          <h2 class="text-sm font-bold text-white">Созданные события ({existingScenarios.length})</h2>
+          <p class="text-xs text-[#a39e95]">Все ситуации, созданные вами с нуля. Они активны в симуляции и сохраняются на сервере.</p>
+        </div>
+        <button onclick={() => { activeTab = 'constructor'; playClickSound(); }} class="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 text-stone-950 font-bold text-xs shadow-md flex items-center gap-1.5 cursor-pointer">
+          <span>+ Создать событие</span>
+        </button>
+      </div>
+
+      {#if existingScenarios.length === 0}
+        <div class="p-10 rounded-2xl bg-[#141210] border border-[#2d2924] text-center flex flex-col items-center gap-3">
+          <span class="text-4xl">📭</span>
+          <div class="text-sm font-bold text-white">Список событий пуст</div>
+          <p class="text-xs text-stone-400 max-w-md">Все заготовленные сценарии удалены. Создайте свои уникальные сценарии с нуля в Event-Конструкторе!</p>
+          <button onclick={() => { activeTab = 'constructor'; playClickSound(); }} class="mt-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 text-black font-bold text-xs cursor-pointer">
+            ✨ Перейти в Конструктор
+          </button>
+        </div>
+      {:else}
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {#each existingScenarios as sc}
+            <div class="p-4 rounded-xl bg-[#141210] border border-[#2d2924] hover:border-amber-500/40 transition-all flex flex-col justify-between gap-3 shadow-md">
+              <div class="space-y-2.5">
+                <div class="flex items-start justify-between gap-2">
+                  <div class="font-bold text-sm text-white line-clamp-1">{sc.title}</div>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono shrink-0 {sc.is_passive ? 'bg-purple-950/60 text-purple-300 border border-purple-500/40' : 'bg-rose-950/60 text-rose-300 border border-rose-500/40'}">
+                    {sc.is_passive ? '👁️ Скрытое' : '🔔 С вызовом'}
+                  </span>
+                </div>
+
+                <div class="flex items-center gap-1.5 text-[11px] text-stone-400 flex-wrap">
+                  <span class="px-2 py-0.5 rounded bg-black/60 border border-[#2d2924]">
+                    {sc.target_archetype === 'male_young' ? '👨 Парень' : sc.target_archetype === 'female_young' ? '👩 Девушка' : sc.target_archetype === 'female_elderly' ? '👵 Бабушка' : '🎲 Любой'}
+                  </span>
+                  <span class="px-2 py-0.5 rounded bg-black/60 border border-[#2d2924]">
+                    {sc.trigger?.type === 'chained' ? `🔗 Цепная (${sc.trigger?.delay_sec || 0}с)` : sc.trigger?.type === 'test' ? '⏱️ Тест' : '🎲 GameMaster'}
+                  </span>
+                  {#if sc.ambient_audio}
+                    <span class="px-2 py-0.5 rounded bg-blue-950/50 text-blue-300 border border-blue-500/30">
+                      🎵 {sc.ambient_audio}
+                    </span>
+                  {/if}
+                </div>
+
+                {#if sc.llm_system_prompt}
+                  <div class="p-2.5 rounded bg-black/40 border border-[#2d2924] text-[11px] text-stone-300 italic line-clamp-2">
+                    «{sc.llm_system_prompt}»
+                  </div>
+                {/if}
+
+                {#if sc.expected_rule}
+                  <div class="text-[10px] text-amber-400 line-clamp-1">
+                    <strong>Правило:</strong> {sc.expected_rule}
+                  </div>
+                {/if}
+              </div>
+
+              <div class="flex items-center justify-between pt-2.5 border-t border-[#2d2924]">
+                <span class="text-[10px] font-mono text-stone-500">{sc.id}</span>
+                <button onclick={() => deleteScenario(sc.id)} class="px-3 py-1 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 hover:text-rose-200 border border-rose-500/30 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1">
+                  🗑️ Удалить
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
   {:else}
     <!-- Заглушка базы знаний -->
