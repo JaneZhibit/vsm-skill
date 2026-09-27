@@ -38,7 +38,7 @@ function getLegMaxSpeed(legIndex: number): number {
 export class TrainPhysicsStore {
   timeSeconds = $state<number>(timeStringToSeconds('13:50:00'));
   speed = $state<number>(0);
-  isPaused = $state<boolean>(false);
+  isPaused = $state<boolean>(true);
   timeScale = $state<number>(1.0); // Всегда 1.0
   cabinTemperature = $state<number>(24);
   wagonType = $state<'Комфорт'>('Комфорт');
