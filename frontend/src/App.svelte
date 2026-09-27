@@ -24,7 +24,8 @@
   });
 </script>
 
-<main class="h-screen w-screen overflow-hidden bg-[#0f0e0d] text-[#f5f3ef] flex flex-col selection:bg-amber-500 selection:text-black select-none">
+<!-- ИСПРАВЛЕНИЕ: h-[100dvh] вместо h-screen -->
+<main class="h-[100dvh] w-screen overflow-hidden bg-[#0f0e0d] text-[#f5f3ef] flex flex-col selection:bg-amber-500 selection:text-black select-none">
   {#if authStore.currentRoute === 'login'}
     <Login />
   {:else if authStore.currentRoute === 'simulator'}

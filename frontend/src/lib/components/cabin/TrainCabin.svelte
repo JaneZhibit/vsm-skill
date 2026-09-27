@@ -174,13 +174,18 @@
             <span class="trigger-alert-badge"><span class="trigger-alert-ping"></span>{cabinState.alertSeatsCount}</span>
           {/if}
         </button>
+        <!-- КНОПКА МЕНЮ ПАУЗЫ -->
         <button onclick={() => { playClickSound(); isSettingsOpen = true; }} class="seat-map-trigger-btn !px-3" title="Меню">
           <span class="trigger-icon text-base">⚙️</span>
         </button>
       </div>
     {:else}
       <div class="seat-top-bar">
-        <!-- Оставим только кнопки здесь, т.к. "В проход" теперь внутри диалога -->
+        <div class="seat-stepper-mini">
+          <button onclick={handlePrevSeat} class="stepper-mini-btn">◀ Пред</button>
+          <button onclick={handleOpenSeatMap} class="stepper-mini-seat">💺 Место {selectedSeat?.id || '—'}</button>
+          <button onclick={handleNextSeat} class="stepper-mini-btn">След ▶</button>
+        </div>
       </div>
     {/if}
   </div>
@@ -242,8 +247,8 @@
     {@const isPreTripGameActive = conductorState.shiftPhase === 'initial_round' && !trainWorld.isPreTripDone && !trainWorld.preTripNeedsRadio}
 
     {#if !isPreTripGameActive}
-      <div class="bottom-ui-panel pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-        <div class="pointer-events-auto w-full flex justify-center z-[50] relative px-3 md:px-0">
+      <div class="bottom-ui-panel">
+        <div class="pointer-events-auto w-full flex justify-center z-[50] relative">
           {#if isTripFinished}
             <button onclick={() => { isDebriefOpen = true; }} disabled={!trainWorld.isPostTripDone} class="main-action-btn from-emerald-600 to-teal-500 border-emerald-400 {trainWorld.isPostTripDone ? 'animate-bounce' : 'grayscale opacity-80'}">
               <span>{trainWorld.isPostTripDone ? '🏁 Итоги смены ➔' : '🧹 Осмотр вагона...'}</span>
@@ -278,14 +283,15 @@
           {/if}
         </div>
 
+        <!-- Сворачиваемая инфо-панель -->
         {#if !isTripFinished && conductorState.shiftPhase !== 'arrival'}
-          <div class="pointer-events-auto w-full max-w-sm mx-auto flex flex-col items-center mt-1 px-3 md:px-0">
+          <div class="pointer-events-auto w-full max-w-sm mx-auto flex flex-col items-center mt-1">
             <button onclick={() => {playClickSound(); isInfoCollapsed = !isInfoCollapsed;}} class="bg-[#141210]/95 border border-b-0 border-[#3d3831] rounded-t-xl px-6 py-1.5 flex items-center justify-center cursor-pointer shadow-md hover:bg-[#1a1816] transition-colors relative z-20">
               <span class="text-[10px] text-stone-400 font-bold uppercase tracking-widest">{isInfoCollapsed ? '▲ Маршрут' : '▼ Скрыть'}</span>
             </button>
 
             <!-- Плавное сворачивание через CSS max-height -->
-            <div class="w-full bg-[#141210]/95 backdrop-blur-md border border-[#3d3831] rounded-xl rounded-t-none shadow-2xl flex flex-col relative z-10 transition-all duration-300 ease-in-out overflow-hidden {isInfoCollapsed ? 'max-h-0 opacity-0 border-none' : 'max-h-[100px] opacity-100 p-2.5 sm:p-3 border-t-0'}">
+            <div class="w-full bg-[#141210]/95 backdrop-blur-md border border-[#3d3831] rounded-xl rounded-t-none shadow-2xl flex flex-col relative z-10 transition-all duration-300 ease-in-out origin-top overflow-hidden {isInfoCollapsed ? 'max-h-0 opacity-0 border-none' : 'max-h-[100px] opacity-100 p-2.5 sm:p-3 border-t-0'}">
               <div class="flex justify-between items-center text-[10px] font-mono text-[#a39e95] uppercase font-semibold">
                 <span class="text-amber-400 bg-[#282420] px-1.5 py-0.5 rounded border border-[#3d3831]">🕒 {physicsState.formattedTime}</span>
                 <div class="text-center flex flex-col items-center leading-tight">
@@ -363,43 +369,47 @@
   .hud-top-bar > * { pointer-events: auto; }
   @media (min-width: 768px) { .hud-top-bar { top: 1.25rem; left: 1.5rem; right: 1.5rem; max-width: 96vw; margin: 0 auto; } }
 
-  /* СТРЕЛКИ НАВИГАЦИИ (ВИДИМЫ ТОЛЬКО НА ТЕЛЕФОНАХ) */
-  .pan-arrow { position: absolute; top: 40%; transform: translateY(-50%); z-index: 40; width: 44px; height: 44px; background: rgba(0, 0, 0, 0.4); color: white; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; cursor: pointer; backdrop-filter: blur(4px); pointer-events: auto; }
-  .pan-arrow:active { background: rgba(0, 0, 0, 0.7); }
-  .left-arrow { left: 0.5rem; }
-  .right-arrow { right: 0.5rem; }
-
-  /* АДАПТИВНЫЙ ФОН КАБИНЫ */
-  .scene-scroll-area { flex: 1 1 0%; min-height: 0; width: 100%; overflow-x: auto; overflow-y: hidden; position: relative; display: flex; align-items: center; justify-content: flex-start; touch-action: pan-x; -webkit-overflow-scrolling: touch; background-color: #050505; }
-  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-  .hide-scrollbar::-webkit-scrollbar { display: none; }
-
-  .scene-container { position: relative; display: inline-block; max-width: 96vw; max-height: 84vh; border-radius: 1rem; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8); background-color: #000; }
-  .base-image { display: block; max-height: 84vh; max-width: 96vw; width: auto; height: auto; object-fit: contain; user-select: none; }
-  .passenger-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
-
+  /* СТРЕЛКИ НАВИГАЦИИ (Только для мобилок) */
+  .pan-arrow { display: none; }
   @media (max-width: 767px) {
-    .scene-scroll-area { position: absolute; top: 10vh; height: 60vh; width: 100vw; align-items: flex-start; }
-    .scene-container { height: 100%; max-height: none; max-width: none; width: auto; aspect-ratio: 1671 / 941; border-radius: 0; box-shadow: none; flex-shrink: 0; }
-    .base-image { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: fill; }
-    .passenger-overlay { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: fill; }
+    .pan-arrow { display: flex; position: absolute; top: 40%; transform: translateY(-50%); z-index: 40; width: 44px; height: 44px; background: rgba(0, 0, 0, 0.4); color: white; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 50%; align-items: center; justify-content: center; font-size: 1.25rem; cursor: pointer; backdrop-filter: blur(4px); pointer-events: auto; }
+    .pan-arrow:active { background: rgba(0, 0, 0, 0.7); }
+    .left-arrow { left: 0.5rem; }
+    .right-arrow { right: 0.5rem; }
+  }
+
+  /* СЦЕНА ВАГОНА (DESKTOP - ПО ЦЕНТРУ) */
+  .scene-scroll-area { flex: 1 1 0%; min-height: 0; width: 100%; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; background-color: #050505; }
+  .scene-container { position: relative; display: inline-block; max-width: 96vw; max-height: 84vh; aspect-ratio: 1671 / 941; border-radius: 1rem; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8); background-color: #000; }
+  .base-image, .passenger-overlay { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
+
+  /* СЦЕНА ВАГОНА (MOBILE - СДВИГ ВВЕРХ И СКРОЛЛ) */
+  @media (max-width: 767px) {
+    .scene-scroll-area { position: absolute; top: 10vh; height: 60vh; width: 100vw; align-items: flex-start; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; touch-action: pan-x; -webkit-overflow-scrolling: touch; }
+    .scene-container { height: 100%; max-height: none; max-width: none; width: auto; border-radius: 0; box-shadow: none; flex-shrink: 0; }
+    .base-image, .passenger-overlay { object-fit: fill; }
     .ambient-sway { animation: swayPan 14s ease-in-out infinite alternate; will-change: transform; }
     .scene-scroll-area:active .ambient-sway { animation-play-state: paused; }
     @keyframes swayPan { 0% { transform: translateX(-1.2%); } 100% { transform: translateX(1.2%); } }
   }
 
-  /* === ИСПРАВЛЕНИЕ: НИЖНЯЯ ПАНЕЛЬ ПРИПОДНЯТА ОТ КРАЯ ЭКРАНА И ИМЕЕТ ОТСТУПЫ ПО БОКАМ === */
-  .bottom-ui-panel { position: absolute; bottom: max(1.5rem, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: 100%; max-width: 48rem; z-index: 50; display: flex; flex-direction: column; align-items: center; pointer-events: none; padding: 0 0.75rem; }
+  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
 
-  /* Универсальная кнопка действия */
-  .main-action-btn { width: 100%; max-width: 24rem; padding: 0.75rem 1.25rem; border-radius: 1rem; font-weight: 800; font-size: 0.875rem; color: #fff; background-image: linear-gradient(to right, var(--tw-gradient-stops)); border-width: 1px; box-shadow: 0 10px 20px -5px rgba(0,0,0,0.5); cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+  /* НИЖНИЕ ПАНЕЛИ (С ЧЕСТНЫМ ОТСТУПОМ СНИЗУ) */
+  .bottom-ui-panel { position: absolute; bottom: 1.5rem; left: 50%; transform: translateX(-50%); width: 100%; max-width: 48rem; z-index: 50; display: flex; flex-direction: column; align-items: center; pointer-events: none; padding: 0 1rem; }
+  .dialogue-wrapper { position: absolute; bottom: 1.5rem; left: 50%; transform: translateX(-50%); width: 100%; max-width: 54rem; z-index: 30; pointer-events: none; padding: 0 1rem; }
+
+  @media (max-width: 767px) {
+    .bottom-ui-panel { bottom: max(1.5rem, env(safe-area-inset-bottom)); padding: 0 0.5rem; }
+    .dialogue-wrapper { bottom: max(1.5rem, env(safe-area-inset-bottom)); padding: 0 0.5rem; pointer-events: auto; }
+  }
+
+  /* КНОПКА ДЕЙСТВИЯ */
+  .main-action-btn { width: 100%; max-width: 24rem; margin: 0 auto; padding: 0.75rem 1.25rem; border-radius: 1rem; font-weight: 800; font-size: 0.875rem; color: #fff; background-image: linear-gradient(to right, var(--tw-gradient-stops)); border-width: 1px; box-shadow: 0 10px 20px -5px rgba(0,0,0,0.5); cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
   .main-action-btn:active { transform: scale(0.98); }
 
-  /* === ИСПРАВЛЕНИЕ: ОБОЛОЧКА ДИАЛОГА ПРИПОДНЯТА ОТ КРАЯ ЭКРАНА === */
-  .dialogue-wrapper { position: absolute; bottom: max(1rem, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: 100%; max-width: 54rem; z-index: 30; pointer-events: none; padding: 0 0.5rem; }
-  @media (max-width: 767px) { .dialogue-wrapper { pointer-events: auto; } }
-
-  /* Остальные классы HUD */
+  /* ОСТАЛЬНЫЕ ЭЛЕМЕНТЫ HUD */
   .aisle-call-badge { position: absolute; z-index: 25; display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.75rem; border-radius: 0.5rem; background: linear-gradient(135deg, rgba(244, 63, 94, 0.95), rgba(225, 29, 72, 0.95)); border: 1px solid rgba(254, 205, 211, 0.9); color: #ffffff; font-size: 0.75rem; font-weight: bold; box-shadow: 0 8px 20px -3px rgba(225, 29, 72, 0.6); cursor: pointer; white-space: nowrap; }
   .call-ping { position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 9999px; background-color: #f43f5e; animation: ping 1.5s infinite; }
   @keyframes ping { 75%, 100% { transform: scale(2); opacity: 0; } }
@@ -429,7 +439,7 @@
   .toast-title { font-size: 0.8rem; font-weight: 700; color: #f59e0b; }
   .toast-subtitle { font-size: 0.7rem; color: #d6d3cd; }
 
-  /* Параллакс окна */
+  /* ПАРАЛЛАКС ОКНА */
   .window-viewport { position: absolute; top: 0; bottom: 0; width: 50%; z-index: 1; overflow: hidden; pointer-events: none; }
   .left-viewport { left: 0; }
   .right-viewport { right: 0; transform: scaleX(-1); }

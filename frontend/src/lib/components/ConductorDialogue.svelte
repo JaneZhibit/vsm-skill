@@ -360,7 +360,7 @@
     width: 100%; z-index: 30; pointer-events: auto;
     background: rgba(20, 18, 16, 0.96); backdrop-filter: blur(12px);
     border: 1px solid rgba(245, 158, 11, 0.5);
-    border-radius: 1rem; /* Скруглено со всех сторон */
+    border-radius: 1rem;
     padding: 0.75rem 1rem;
     box-shadow: 0 10px 30px rgba(0,0,0,0.7);
     display: flex; flex-direction: column; gap: 0.25rem;
