@@ -22,6 +22,15 @@
   const isTripFinished = $derived(
     trainWorld.currentKm >= 678.5 || trainWorld.timeSeconds >= 58500
   );
+  const isCabinEmpty = $derived(
+    trainWorld.shiftPhase === 'initial_round' ||
+    trainWorld.shiftPhase === 'arrival' ||
+    isTripFinished ||
+    trainWorld.occupiedSeatsCount === 0
+  );
+  const cabinImageSrc = $derived(
+    isCabinEmpty ? '/assets/cabin.png' : '/assets/cabin_aisle_transparent.png'
+  );
 
   function getSeatCoords(seatId: string) {
     const row = parseInt(seatId.slice(0, -1)) || 2;
@@ -256,9 +265,9 @@
           class:platform-visible={trainWorld.speed < 5 && trainWorld.movementStatus.includes('Стоянка')}
         ></div>
 
-        <!-- СЛОЙ 2: Салон с вырезанными окнами (задает геометрию контейнера) -->
+        <!-- СЛОЙ 2: Салон (с людьми в пути или пустой cabin.png при приемке / прибытии) -->
         <img
-          src="/assets/cabin_aisle_transparent.png"
+          src={cabinImageSrc}
           alt="Вагон"
           class="base-image cabin-overlay"
         />
@@ -362,7 +371,7 @@
               target.src = `/assets/passengers/${p.archetype_id}/neutral.png`;
             }}
           />
-        {:else if trainWorld.passengerMood !== 'empty'}
+        {:else if !isCabinEmpty && trainWorld.passengerMood !== 'empty'}
           <img
             src={trainWorld.passengerMood === 'calm'
               ? '/assets/passenger_calm.png'
