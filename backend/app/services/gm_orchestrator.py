@@ -76,6 +76,9 @@ class GameMaster:
 
         for trigger in self.active_triggers:
             sc = trigger.get("payload", {})
+            inc_id = sc.get("incident_id", trigger.get("incident_id", trigger.get("id")))
+            if inc_id and (inc_id in self.running_incidents or inc_id in self.resolved_incidents):
+                continue
             trig_info = sc.get("trigger", {})
             t_type = trig_info.get("type", "time")
             val = trig_info.get("value")
@@ -141,9 +144,13 @@ class GameMaster:
             return
 
         keys = list(SCENARIOS_DB.keys())
-        if not force_incident and not keys:
+        available_keys = [k for k in keys if k not in self.running_incidents and k not in self.resolved_incidents]
+        if not force_incident and not available_keys:
             return
-        incident_id = force_incident or random.choice(keys)
+        incident_id = force_incident or random.choice(available_keys)
+
+        if incident_id in self.running_incidents or incident_id in self.resolved_incidents:
+            return
         incident_data = get_frontend_incident_data(incident_id)
         scenario = SCENARIOS_DB.get(incident_id, {})
         
@@ -183,4 +190,6 @@ class GameMaster:
                 res_copy["feedback"] = f"Р’ СЂРµР°Р»СЊРЅРѕСЃС‚Рё СЌС‚Рѕ СЂРµС€РµРЅРёРµ РїСЂРёРІРµР»Рѕ Р±С‹ Рє Р¶Р°Р»РѕР±Рµ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·! РђРЅР°Р»РёР·: {res_copy.get('feedback', '')}"
         
         return res_copy
+
+
 
