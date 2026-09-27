@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
   import { fade, fly } from 'svelte/transition';
 
   // Утилиты и сторы
@@ -20,12 +21,9 @@
   import PreTripMiniGame from './PreTripMiniGame.svelte';
 
   let isSeatMapOpen = $state<boolean>(false);
-  let isResetConfirmOpen = $state<boolean>(false);
   let isDebriefOpen = $state<boolean>(false);
-
-  // Новые состояния для мобильного UI
   let isSettingsOpen = $state<boolean>(false);
-  let isInfoCollapsed = $state<boolean>(false); // Свернута ли нижняя панель времени
+  let isInfoCollapsed = $state<boolean>(false);
 
   let selectedSeat = $derived(cabinState.selectedSeat);
   let callingSeat = $derived(
@@ -36,9 +34,7 @@
     )
   );
 
-  const isTripFinished = $derived(
-    physicsState.currentKm >= 678.5 || physicsState.timeSeconds >= 58500
-  );
+  const isTripFinished = $derived(physicsState.currentKm >= 678.5 || physicsState.timeSeconds >= 58500);
 
   const isCabinEmpty = $derived(
     conductorState.shiftPhase === 'initial_round' ||
@@ -47,44 +43,53 @@
     cabinState.occupiedSeatsCount === 0
   );
 
-  const cabinImageSrc = $derived(
-    isCabinEmpty ? '/assets/cabin.jpg' : '/assets/cabin_aisle_transparent.png'
-  );
+  const cabinImageSrc = $derived(isCabinEmpty ? '/assets/cabin.jpg' : '/assets/cabin_aisle_transparent.png');
+
+  // --- БЛОКИРОВКА КНОПКИ "НАЗАД" НА ANDROID ---
+  onMount(() => {
+    // Создаем "ложное" состояние истории
+    window.history.pushState({ simulatorLocked: true }, '', window.location.href);
+
+    const handlePopState = (e: PopStateEvent) => {
+      // Пользователь нажал "Назад". Возвращаем ложное состояние обратно
+      window.history.pushState({ simulatorLocked: true }, '', window.location.href);
+      // Открываем меню паузы вместо выхода из приложения
+      if (!isSettingsOpen && !isSeatMapOpen) {
+        playClickSound();
+        isSettingsOpen = true;
+      } else if (isSeatMapOpen) {
+        isSeatMapOpen = false;
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  });
+  // -------------------------------------------
 
   function getSeatCoords(seatId: string) {
     const row = parseInt(seatId.slice(0, -1)) || 2;
     const letter = seatId.slice(-1);
     const isLeft = letter === 'A' || letter === 'B';
-
     const depth = Math.min(1, Math.max(0, (row - 1) / 11));
     const top = 62 - depth * 28;
     const left = isLeft ? 18 + depth * 25 : 82 - depth * 25;
     const scale = 1.05 - depth * 0.4;
-
     return { top: `${top}%`, left: `${left}%`, scale, isLeft };
   }
 
   function handleCallClick(seatId?: string) {
     playCallBell();
-    if (seatId) {
-      cabinState.inspectSeat(seatId);
-    } else {
+    if (seatId) cabinState.inspectSeat(seatId);
+    else {
       const activeSeat = cabinState.seats.find((s) => s.activeIncident != null);
-      if (activeSeat) {
-        cabinState.inspectSeat(activeSeat.id);
-      }
+      if (activeSeat) cabinState.inspectSeat(activeSeat.id);
     }
   }
 
   function handlePrevSeat() { playClickSound(); cabinState.prevOccupiedSeat(); if (cabinState.selectedSeat) cabinState.inspectSeat(cabinState.selectedSeat.id); }
   function handleNextSeat() { playClickSound(); cabinState.nextOccupiedSeat(); if (cabinState.selectedSeat) cabinState.inspectSeat(cabinState.selectedSeat.id); }
   function handleOpenSeatMap() { playClickSound(); isSeatMapOpen = true; }
-
-  async function handleConfirmNewTrip() {
-    playSuccessSound();
-    isResetConfirmOpen = false;
-    await trainWorld.startNewTrip();
-  }
 
   function handleExitToMenu() {
     playClickSound();
@@ -98,9 +103,7 @@
     if (!scrollAreaEl) return;
     const maxScroll = scrollAreaEl.scrollWidth - scrollAreaEl.clientWidth;
     if (maxScroll <= 0) return;
-
     let targetLeft = maxScroll / 2;
-
     if (cabinState.currentView === 'seat') {
       const letter = selectedSeat?.id.slice(-1);
       if (letter === 'A' || letter === 'B') targetLeft = maxScroll * 0.22;
@@ -110,7 +113,6 @@
       if (letter === 'A' || letter === 'B') targetLeft = maxScroll * 0.25;
       else if (letter === 'C' || letter === 'D') targetLeft = maxScroll * 0.75;
     }
-
     scrollAreaEl.scrollTo({ left: targetLeft, behavior: smooth ? 'smooth' : 'auto' });
   }
 
@@ -172,9 +174,9 @@
             <span class="trigger-alert-badge"><span class="trigger-alert-ping"></span>{cabinState.alertSeatsCount}</span>
           {/if}
         </button>
-        <!-- НОВАЯ КНОПКА НАСТРОЕК/МЕНЮ -->
-        <button onclick={() => { playClickSound(); isSettingsOpen = true; }} class="seat-map-trigger-btn !px-2.5" title="Меню">
-          <span class="trigger-icon">⚙️</span>
+        <!-- КНОПКА МЕНЮ ПАУЗЫ -->
+        <button onclick={() => { playClickSound(); isSettingsOpen = true; }} class="seat-map-trigger-btn !px-3" title="Меню">
+          <span class="trigger-icon text-base">⚙️</span>
         </button>
       </div>
     {:else}
@@ -234,14 +236,13 @@
     {/if}
   </div>
 
-  <!-- НИЖНЯЯ ПАНЕЛЬ -->
+  <!-- НИЖНЯЯ ПАНЕЛЬ С ДЕЙСТВИЯМИ И ИНФО -->
   {#if cabinState.currentView === 'aisle'}
     {@const isPreTripGameActive = conductorState.shiftPhase === 'initial_round' && !trainWorld.isPreTripDone && !trainWorld.preTripNeedsRadio}
 
     {#if !isPreTripGameActive}
-      <div class="bottom-ui-panel">
-        <!-- Основная кнопка действия -->
-        <div class="pointer-events-auto w-full flex justify-center z-[50] relative">
+      <div class="bottom-ui-panel pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <div class="pointer-events-auto w-full flex justify-center z-[50] relative px-3 md:px-0">
           {#if isTripFinished}
             <button onclick={() => { isDebriefOpen = true; }} disabled={!trainWorld.isPostTripDone} class="main-action-btn from-emerald-600 to-teal-500 border-emerald-400 {trainWorld.isPostTripDone ? 'animate-bounce' : 'grayscale opacity-80'}">
               <span>{trainWorld.isPostTripDone ? '🏁 Итоги смены ➔' : '🧹 Осмотр вагона...'}</span>
@@ -258,7 +259,7 @@
               </button>
             {:else}
               <button onclick={() => { playSuccessSound(); trainWorld.startCruisePhase(); }} disabled={!trainWorld.isPreTripDone} class="main-action-btn from-amber-600 to-yellow-500 text-stone-950 border-amber-400 {trainWorld.isPreTripDone ? '' : 'grayscale opacity-80'}">
-                <span>{trainWorld.isPreTripDone ? '🚪 Начать посадку (14:00) ➔' : '🔍 Приемка вагона...'}</span>
+                <span>{trainWorld.isPreTripDone ? '🚪 Начать посадку ➔' : '🔍 Приемка вагона...'}</span>
               </button>
             {/if}
           {:else if conductorState.shiftPhase === 'cruise'}
@@ -278,47 +279,44 @@
 
         <!-- Сворачиваемая инфо-панель -->
         {#if !isTripFinished && conductorState.shiftPhase !== 'arrival'}
-          <div class="pointer-events-auto w-full max-w-sm mx-auto flex flex-col items-center">
-            <!-- Кнопка свернуть/развернуть -->
-            <button onclick={() => {playClickSound(); isInfoCollapsed = !isInfoCollapsed;}} class="bg-[#141210]/95 border border-b-0 border-[#3d3831] rounded-t-xl px-4 py-1 flex items-center justify-center cursor-pointer hover:bg-[#1a1816]">
+          <div class="pointer-events-auto w-full max-w-sm mx-auto flex flex-col items-center mt-1 px-3 md:px-0">
+            <button onclick={() => {playClickSound(); isInfoCollapsed = !isInfoCollapsed;}} class="bg-[#141210]/95 border border-b-0 border-[#3d3831] rounded-t-xl px-6 py-1.5 flex items-center justify-center cursor-pointer shadow-md hover:bg-[#1a1816] transition-colors relative z-20">
               <span class="text-[10px] text-stone-400 font-bold uppercase tracking-widest">{isInfoCollapsed ? '▲ Маршрут' : '▼ Скрыть'}</span>
             </button>
 
-            {#if !isInfoCollapsed}
-              <div class="w-full bg-[#141210]/95 backdrop-blur-md border border-[#3d3831] rounded-xl rounded-t-none p-2 sm:p-3 shadow-2xl flex flex-col gap-2 relative z-10" transition:slide={{duration: 200}}>
-                <div class="flex justify-between items-center text-[10px] font-mono text-[#a39e95] uppercase font-semibold">
-                  <span class="text-amber-400 bg-[#282420] px-1.5 py-0.5 rounded border border-[#3d3831]">🕒 {physicsState.formattedTime}</span>
-                  <div class="text-center flex flex-col items-center leading-tight">
-                    <span class="text-white">След: {physicsState.nextStation?.label || 'С-Петербург'}</span>
-                    <span class="opacity-60 text-[9px]">{physicsState.nextStation?.plannedTime || '16:15'}</span>
-                  </div>
-                </div>
-                <div class="relative w-full h-1.5 bg-[#2d2924] rounded-full mt-0.5">
-                  <div class="absolute top-0 left-0 h-full bg-amber-500 rounded-full transition-all duration-1000 ease-out" style="width: {physicsState.progressPercent}%"></div>
-                  <div class="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-white border border-amber-500 rounded-full shadow-[0_0_8px_rgba(245,158,11,0.8)] transition-all duration-1000 ease-out" style="left: {physicsState.progressPercent}%"></div>
+            <!-- Обертка для анимации высоты через CSS -->
+            <div class="w-full bg-[#141210]/95 backdrop-blur-md border border-[#3d3831] rounded-xl rounded-t-none shadow-2xl flex flex-col relative z-10 transition-all duration-300 ease-in-out origin-bottom overflow-hidden {isInfoCollapsed ? 'max-h-0 opacity-0 border-none' : 'max-h-[100px] opacity-100 p-2.5 sm:p-3 border-t-0'}">
+              <div class="flex justify-between items-center text-[10px] font-mono text-[#a39e95] uppercase font-semibold">
+                <span class="text-amber-400 bg-[#282420] px-1.5 py-0.5 rounded border border-[#3d3831]">🕒 {physicsState.formattedTime}</span>
+                <div class="text-center flex flex-col items-center leading-tight">
+                  <span class="text-white truncate max-w-[120px]">След: {physicsState.nextStation?.label || 'С-Петербург'}</span>
+                  <span class="opacity-60 text-[9px]">{physicsState.nextStation?.plannedTime || '16:15'}</span>
                 </div>
               </div>
-            {/if}
+              <div class="relative w-full h-1.5 bg-[#2d2924] rounded-full mt-2">
+                <div class="absolute top-0 left-0 h-full bg-amber-500 rounded-full transition-all duration-1000 ease-out" style="width: {physicsState.progressPercent}%"></div>
+                <div class="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-white border border-amber-500 rounded-full shadow-[0_0_8px_rgba(245,158,11,0.8)] transition-all duration-1000 ease-out" style="left: {physicsState.progressPercent}%"></div>
+              </div>
+            </div>
           </div>
         {/if}
       </div>
     {/if}
   {:else}
-    <div class="dialogue-wrapper">
+    <div class="dialogue-wrapper pb-[max(0.5rem,env(safe-area-inset-bottom))]">
       <ConductorDialogue />
     </div>
   {/if}
 
-  <!-- МЕНЮ НАСТРОЕК И ПАУЗЫ -->
+  <!-- МЕНЮ ПАУЗЫ -->
   {#if isSettingsOpen}
-    <div class="fixed inset-0 z-[150] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" transition:fade={{duration: 150}}>
+    <div class="fixed inset-0 z-[150] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4" transition:fade={{duration: 150}}>
       <div class="w-full max-w-sm bg-[#1a1816] border border-[#3d3831] rounded-2xl p-5 shadow-2xl flex flex-col gap-4" transition:fly={{y: 20, duration: 200}}>
         <div class="text-center pb-3 border-b border-[#2d2924]">
           <h2 class="text-lg font-bold text-white mb-1">Меню симуляции</h2>
           <div class="text-xs font-mono text-amber-400">Рейс № 754 • {conductorState.conductorProfile.role}</div>
         </div>
 
-        <!-- Рейтинг текущей сессии (перенесен из хедера) -->
         <div class="flex justify-between items-center bg-[#141210] p-3 rounded-xl border border-[#2d2924]">
           <span class="text-xs text-stone-400 uppercase font-bold">Оценка ЗУН:</span>
           <div class="flex gap-3 text-xs font-mono font-bold">
@@ -334,12 +332,12 @@
           </button>
 
           <button onclick={handleExitToMenu} class="w-full p-3 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-sm font-bold text-rose-400 transition-colors cursor-pointer text-center">
-            🚪 Выйти в меню рейсов
+            🚪 Прервать рейс и выйти
           </button>
         </div>
 
-        <button onclick={() => { playClickSound(); isSettingsOpen = false; }} class="w-full mt-2 p-3.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 text-sm font-bold shadow-lg shadow-amber-500/20 cursor-pointer">
-          ▶ Продолжить
+        <button onclick={() => { playClickSound(); isSettingsOpen = false; }} class="w-full mt-2 p-3.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 text-stone-950 text-sm font-bold shadow-lg shadow-amber-500/20 cursor-pointer">
+          ▶ Вернуться в вагон
         </button>
       </div>
     </div>
@@ -358,7 +356,6 @@
 </div>
 
 <style>
-  /* Основные стили остались прежними, добавлены классы для новых элементов */
   .cabin-viewport { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden; background-color: #0f0e0d; }
   @media (min-width: 768px) { .cabin-viewport { display: flex; flex-direction: row; align-items: center; justify-content: center; padding: 0.5rem; } }
 
@@ -387,25 +384,22 @@
   }
 
   /* КОМПАКТНАЯ НИЖНЯЯ ПАНЕЛЬ */
-  .bottom-ui-panel { position: absolute; bottom: calc(0.5rem + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: 91.666667%; max-width: 48rem; z-index: 50; display: flex; flex-direction: column; align-items: center; gap: 0.25rem; pointer-events: none; }
-  @media (max-width: 767px) {
-    .bottom-ui-panel { position: absolute; bottom: calc(0.5rem + env(safe-area-inset-bottom)); width: 100%; max-width: none; padding: 0 0.5rem; gap: 0; }
-  }
+  .bottom-ui-panel { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 48rem; z-index: 50; display: flex; flex-direction: column; align-items: center; pointer-events: none; }
 
   /* Универсальная кнопка действия */
-  .main-action-btn { width: 100%; max-width: 24rem; padding: 0.65rem 1.25rem; border-radius: 9999px; font-weight: 800; font-size: 0.875rem; color: #fff; background-image: linear-gradient(to right, var(--tw-gradient-stops)); border-width: 1px; box-shadow: 0 10px 20px -5px rgba(0,0,0,0.5); cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.25rem; }
+  .main-action-btn { width: 100%; max-width: 24rem; padding: 0.75rem 1.25rem; border-radius: 1rem; font-weight: 800; font-size: 0.875rem; color: #fff; background-image: linear-gradient(to right, var(--tw-gradient-stops)); border-width: 1px; box-shadow: 0 10px 20px -5px rgba(0,0,0,0.5); cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
   .main-action-btn:active { transform: scale(0.98); }
 
-  .dialogue-wrapper { position: absolute; bottom: calc(0.5rem + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: 91.666667%; max-width: 54rem; z-index: 30; pointer-events: none; }
-  @media (max-width: 767px) { .dialogue-wrapper { position: absolute; bottom: 0; width: 100%; max-width: none; flex-shrink: 0; pointer-events: auto; max-height: 55vh; overflow-y: auto; } }
+  .dialogue-wrapper { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 54rem; z-index: 30; pointer-events: none; }
+  @media (max-width: 767px) { .dialogue-wrapper { max-height: 55vh; overflow-y: auto; pointer-events: auto; } }
 
   /* Остальные классы HUD */
-  .aisle-call-badge { position: absolute; z-index: 25; display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.875rem; border-radius: 0.75rem; background: linear-gradient(135deg, rgba(244, 63, 94, 0.95), rgba(225, 29, 72, 0.95)); border: 2px solid rgba(254, 205, 211, 0.9); color: #ffffff; font-size: 0.8125rem; box-shadow: 0 10px 25px -3px rgba(225, 29, 72, 0.6); cursor: pointer; white-space: nowrap; }
-  .call-ping { position: absolute; top: -4px; right: -4px; width: 12px; height: 12px; border-radius: 9999px; background-color: #f43f5e; animation: ping 1.5s infinite; }
+  .aisle-call-badge { position: absolute; z-index: 25; display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.75rem; border-radius: 0.5rem; background: linear-gradient(135deg, rgba(244, 63, 94, 0.95), rgba(225, 29, 72, 0.95)); border: 1px solid rgba(254, 205, 211, 0.9); color: #ffffff; font-size: 0.75rem; font-weight: bold; box-shadow: 0 8px 20px -3px rgba(225, 29, 72, 0.6); cursor: pointer; white-space: nowrap; }
+  .call-ping { position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 9999px; background-color: #f43f5e; animation: ping 1.5s infinite; }
   @keyframes ping { 75%, 100% { transform: scale(2); opacity: 0; } }
 
   .aisle-phase-banner { position: relative; z-index: 25; }
-  .phase-banner-content { display: flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.6rem; border-radius: 0.5rem; background: rgba(20, 18, 16, 0.92); backdrop-filter: blur(10px); border: 1px solid #3d3831; color: #f5f3ef; font-size: 0.6875rem; box-shadow: 0 4px 15px rgba(0,0,0,0.6); }
+  .phase-banner-content { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.6rem; border-radius: 0.5rem; background: rgba(20, 18, 16, 0.92); backdrop-filter: blur(10px); border: 1px solid #3d3831; color: #f5f3ef; font-size: 0.6875rem; box-shadow: 0 4px 15px rgba(0,0,0,0.6); }
   .phase-round { border-color: rgba(245, 158, 11, 0.4); }
   .phase-cruise { border-color: rgba(59, 130, 246, 0.4); background: rgba(15, 23, 42, 0.92); }
   .phase-warning { border-color: rgba(245, 158, 11, 0.8); background: rgba(45, 30, 15, 0.95); }
@@ -413,7 +407,7 @@
   .phase-pulse-dot { width: 6px; height: 6px; border-radius: 50%; background-color: #3b82f6; animation: pulse 1.5s infinite; }
 
   .top-actions-cluster { position: relative; z-index: 25; display: flex; align-items: center; gap: 0.4rem; }
-  .seat-map-trigger-btn { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.6rem; border-radius: 0.5rem; background: rgba(26, 24, 22, 0.9); border: 1px solid #3d3831; color: #f5f3ef; font-size: 0.6875rem; font-weight: 600; cursor: pointer; backdrop-filter: blur(10px); }
+  .seat-map-trigger-btn { display: flex; align-items: center; justify-content: center; gap: 0.4rem; padding: 0.35rem 0.6rem; border-radius: 0.5rem; background: rgba(26, 24, 22, 0.9); border: 1px solid #3d3831; color: #f5f3ef; font-size: 0.6875rem; font-weight: 600; cursor: pointer; backdrop-filter: blur(10px); }
   .seat-map-trigger-btn:hover { background: rgba(40, 36, 32, 0.95); border-color: #f59e0b; color: #f59e0b; }
   .trigger-alert-badge { position: relative; display: inline-flex; align-items: center; justify-content: center; padding: 0.1rem 0.35rem; border-radius: 999px; background: #e11d48; color: #fff; font-size: 0.6rem; font-weight: 700; line-height: 1; }
   .trigger-alert-ping { position: absolute; inset: -2px; border-radius: 999px; background: #f43f5e; opacity: 0.75; animation: ping 1.5s infinite; }
