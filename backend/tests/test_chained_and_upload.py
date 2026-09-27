@@ -120,5 +120,62 @@ class TestChainedAndUpload(unittest.TestCase):
         self.assertEqual(len(fired), 1)
         self.assertEqual(fired[0]["id"], "child_resolved")
 
+    def test_ambient_audio_propagation(self):
+        # Create a live scenario with ambient audio
+        payload = {
+            "title": "Пассажир с вейпом",
+            "target_archetype": "male_young",
+            "trigger": {"type": "time", "value": 15},
+            "allowed_moods": ["vaping_calm", "vaping_angry"],
+            "ambient_audio": "vape_hiss.mp3",
+            "is_passive": True,
+            "llm_system_prompt": "Пассажир выпускает пар",
+            "expected_rule": "Курение запрещено",
+            "skills": ["safety"]
+        }
+        res = self.client.post("/api/v1/simulation/custom-live-scenario", json=payload)
+        self.assertEqual(res.status_code, 200)
+        inc_id = res.json()["incident_id"]
+
+        from app.services.scenarios import get_frontend_incident_data
+        data = get_frontend_incident_data(inc_id)
+        self.assertIsNotNone(data)
+        self.assertEqual(data.get("ambient_audio"), "vape_hiss.mp3")
+
+        # Test execution on a seat
+        passenger = PassengerProfile(
+            first_name="Тест",
+            last_name="Вейпер",
+            patronymic="Тестович",
+            full_name="Вейпер Тест Тестович",
+            gender="m",
+            archetype_id="male_young",
+            trait="demanding",
+            age=22,
+            birth_date="01.01.2002",
+            passport_data="1234 567890",
+            state="neutral",
+            sprite_url="/assets/passengers/male_young/neutral.png",
+            destination="Тверь",
+            ticket_status="validated",
+            observation=""
+        )
+        seat = SeatInfo(
+            seat_id="2A",
+            row=2,
+            letter="A",
+            is_occupied=True,
+            passenger=passenger,
+            active_incident=None
+        )
+
+        from app.api.v1.endpoints.simulation import LIVE_SCENARIOS_DB
+        scenario = LIVE_SCENARIOS_DB[inc_id]
+        self.gm._execute_live_scenario(scenario, [seat])
+
+        self.assertIsNotNone(seat.active_incident)
+        self.assertEqual(seat.active_incident.ambient_audio, "vape_hiss.mp3")
+        self.assertIn(seat.passenger.state, ["vaping_calm", "vaping_angry"])
+
 if __name__ == "__main__":
     unittest.main()

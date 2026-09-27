@@ -300,6 +300,7 @@ class GameMaster:
             title=scenario.get("title", "Живое событие"),
             phase=phase_str,
             start_step="step_1",
+            ambient_audio=scenario.get("ambient_audio"),
             steps={
                 "step_1": ScenarioStepSchema(
                     prompt=scenario.get("llm_system_prompt", ""),

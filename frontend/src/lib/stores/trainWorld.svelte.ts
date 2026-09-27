@@ -325,17 +325,30 @@ export class TrainWorldStore {
     physicsState.advanceTimeAndSpeed(deltaSec);
     const t = this.timeSeconds;
 
-    // --- ПРОВЕРКА СКРЫТЫХ ЗВУКОВЫХ СОБЫТИЙ (Эмбиент в салоне) ---
-    const cryingSeat = this.seats.find(s => s.passenger?.state === 'crying_child');
-    if (cryingSeat) {
-      trainAudio.playEventAmbient('crying_child.mp3', 0.25);
-    } else {
-      const vapingSeat = this.seats.find(s => s.passenger?.state === 'vaping');
-      if (vapingSeat) {
+    // === ПРОВЕРКА СКРЫТЫХ ЗВУКОВЫХ СОБЫТИЙ (Эмбиент в салоне) ===
+    const ambientSeat = this.seats.find((s) => {
+      const inc = s.activeIncident;
+      if (inc && typeof inc === 'object' && inc.ambient_audio) return true;
+      const st = s.passenger?.state || '';
+      return st.includes('vaping') || st.includes('crying');
+    });
+
+    if (ambientSeat) {
+      const inc = typeof ambientSeat.activeIncident === 'object' ? ambientSeat.activeIncident : null;
+      const customAudio = inc?.ambient_audio;
+      const st = ambientSeat.passenger?.state || '';
+
+      if (customAudio) {
+        trainAudio.playEventAmbient(customAudio, 0.25);
+      } else if (st.includes('crying')) {
+        trainAudio.playEventAmbient('crying_child.mp3', 0.25);
+      } else if (st.includes('vaping')) {
         trainAudio.playEventAmbient('vape_hiss.mp3', 0.15);
       } else {
         trainAudio.stopEventAmbient();
       }
+    } else {
+      trainAudio.stopEventAmbient();
     }
 
     if (t >= DEPARTURE_SECONDS + 12 && !this.hasPlayedWelcome) {
@@ -437,17 +450,6 @@ export class TrainWorldStore {
       }
     }
 
-    // === ЭМБИЕНТ ПЛАЧУЩЕГО РЕБЕНКА ===
-    const hasCrying = this.seats.some((s) => {
-      if (!s.activeIncident) return false;
-      const incId = typeof s.activeIncident === 'string' ? s.activeIncident : s.activeIncident.incident_id;
-      return incId.includes('crying');
-    });
-    if (hasCrying) {
-      trainAudio.playAmbientLoop('crying_child.mp3', 0.4);
-    } else {
-      trainAudio.stopAmbientLoop('crying_child.mp3');
-    }
 
     // === КОНТРОЛЬ ПОБУДКИ СПЯЩИХ ПАССАЖИРОВ ПЕРЕД СТАНЦИЕЙ ===
     const nextSt = this.nextStation;

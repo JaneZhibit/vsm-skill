@@ -277,20 +277,21 @@ export class TrainAudioStore {
   private currentEventFile: string | null = null;
 
   public playEventAmbient(filename: string, volume: number = 0.2): void {
-    if (this.isAudioMuted) return;
+    if (this.isAudioMuted || !filename) return;
     if (this.currentEventFile === filename && this.currentEventAmbient) return;
 
     this.stopEventAmbient();
 
     try {
-      this.currentEventAmbient = new Audio(`/storage/audio/ambient/${filename}`);
+      const cleanFile = filename.replace(/^\/storage\/audio\/(ambient\/)?/, '');
+      this.currentEventAmbient = new Audio(`/storage/audio/ambient/${cleanFile}`);
       this.currentEventAmbient.loop = true;
       this.currentEventAmbient.volume = volume;
       this.currentEventFile = filename;
       this.currentEventAmbient.play().catch(() => {
         // Фоллбэк: если файл лежит прямо в /storage/audio/
         try {
-          this.currentEventAmbient = new Audio(`/storage/audio/${filename}`);
+          this.currentEventAmbient = new Audio(`/storage/audio/${cleanFile}`);
           this.currentEventAmbient.loop = true;
           this.currentEventAmbient.volume = volume;
           this.currentEventAmbient.play().catch(() => { this.currentEventAmbient = null; });

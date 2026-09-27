@@ -51,6 +51,7 @@ class ActiveIncidentSchema(BaseModel):
     title: str
     phase: Optional[str] = "learning"
     start_step: str = "step_1"
+    ambient_audio: Optional[str] = None
     steps: Dict[str, ScenarioStepSchema]
 
 

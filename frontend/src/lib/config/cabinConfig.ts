@@ -57,6 +57,7 @@ export interface ActiveIncident {
   title: string;
   start_step: string;
   phase?: 'learning' | 'voice_exam' | 'passive' | 'ambient' | 'urgent' | string;
+  ambient_audio?: string;
   steps: Record<string, ScenarioStep>;
   prompt?: string | Record<string, string>;
   timer_seconds?: number;
