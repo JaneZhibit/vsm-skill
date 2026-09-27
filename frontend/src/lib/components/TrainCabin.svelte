@@ -1,6 +1,9 @@
 <script lang="ts">
   import { fly, fade } from 'svelte/transition';
   import { trainWorld } from '../stores/trainWorld.svelte';
+  import { cabinState } from '../stores/cabinState.svelte';
+  import { physicsState } from '../stores/trainPhysics.svelte';
+  import { conductorState } from '../stores/conductorState.svelte';
   import ConductorDialogue from './ConductorDialogue.svelte';
   import CeilingDisplay from './CeilingDisplay.svelte';
   import SeatMapModal from './SeatMapModal.svelte';
@@ -11,23 +14,26 @@
   let isResetConfirmOpen = $state<boolean>(false);
   let isDebriefOpen = $state<boolean>(false);
 
-  let selectedSeat = $derived(trainWorld.selectedSeat);
+  let selectedSeat = $derived(cabinState.selectedSeat);
   let callingSeat = $derived(
-    trainWorld.seats.find(
+    cabinState.seats.find(
       (s) =>
         s.activeIncident != null &&
         (typeof s.activeIncident === 'string' || s.activeIncident.phase !== 'passive')
     )
   );
+
   const isTripFinished = $derived(
-    trainWorld.currentKm >= 678.5 || trainWorld.timeSeconds >= 58500
+    physicsState.currentKm >= 678.5 || physicsState.timeSeconds >= 58500
   );
+
   const isCabinEmpty = $derived(
-    trainWorld.shiftPhase === 'initial_round' ||
-    trainWorld.shiftPhase === 'arrival' ||
+    conductorState.shiftPhase === 'initial_round' ||
+    conductorState.shiftPhase === 'arrival' ||
     isTripFinished ||
-    trainWorld.occupiedSeatsCount === 0
+    cabinState.occupiedSeatsCount === 0
   );
+
   const cabinImageSrc = $derived(
     isCabinEmpty ? '/assets/cabin.png' : '/assets/cabin_aisle_transparent.png'
   );
@@ -37,12 +43,8 @@
     const letter = seatId.slice(-1);
     const isLeft = letter === 'A' || letter === 'B';
 
-    // Ряд 1 - ближе к проводнику (низ экрана), Ряд 12 - вдалеке у двери
     const depth = Math.min(1, Math.max(0, (row - 1) / 11));
-
-    // По вертикали: ряд 1 на 62%, ряд 12 на 34%
     const top = 62 - depth * 28;
-    // По горизонтали: левая сторона сходится к центру (18% -> 43%), правая (82% -> 57%)
     const left = isLeft ? 18 + depth * 25 : 82 - depth * 25;
     const scale = 1.05 - depth * 0.4;
 
@@ -52,33 +54,33 @@
   function handleCallClick(seatId?: string) {
     playCallBell();
     if (seatId) {
-      trainWorld.inspectSeat(seatId);
+      cabinState.inspectSeat(seatId);
     } else {
-      const callingSeat = trainWorld.seats.find((s) => s.activeIncident != null);
+      const callingSeat = cabinState.seats.find((s) => s.activeIncident != null);
       if (callingSeat) {
-        trainWorld.inspectSeat(callingSeat.id);
+        cabinState.inspectSeat(callingSeat.id);
       }
     }
   }
 
   function handleBackToAisle() {
     playClickSound();
-    trainWorld.switchView('aisle');
+    cabinState.switchView('aisle');
   }
 
   function handlePrevSeat() {
     playClickSound();
-    trainWorld.prevOccupiedSeat();
-    if (trainWorld.selectedSeat) {
-      trainWorld.inspectSeat(trainWorld.selectedSeat.id);
+    cabinState.prevOccupiedSeat();
+    if (cabinState.selectedSeat) {
+      cabinState.inspectSeat(cabinState.selectedSeat.id);
     }
   }
 
   function handleNextSeat() {
     playClickSound();
-    trainWorld.nextOccupiedSeat();
-    if (trainWorld.selectedSeat) {
-      trainWorld.inspectSeat(trainWorld.selectedSeat.id);
+    cabinState.nextOccupiedSeat();
+    if (cabinState.selectedSeat) {
+      cabinState.inspectSeat(cabinState.selectedSeat.id);
     }
   }
 
@@ -101,7 +103,7 @@
   let isDirtCanvasInitialized = false;
 
   $effect(() => {
-    const isArrival = trainWorld.shiftPhase === 'arrival' || isTripFinished;
+    const isArrival = conductorState.shiftPhase === 'arrival' || isTripFinished;
     if (isArrival && dirtCanvas && !isDirtCanvasInitialized) {
       isDirtCanvasInitialized = true;
       dirtCtx = dirtCanvas.getContext('2d', { willReadFrequently: true });
@@ -151,7 +153,7 @@
     const currentPoint = getPointerPos(e);
 
     dirtCtx.globalCompositeOperation = 'destination-out';
-    dirtCtx.lineWidth = 120; // Диаметр "губки"
+    dirtCtx.lineWidth = 120;
     dirtCtx.lineCap = 'round';
     dirtCtx.lineJoin = 'round';
 
@@ -173,12 +175,10 @@
       const imgData = dirtCtx.getImageData(0, 0, dirtCanvas.width, dirtCanvas.height);
       const data = imgData.data;
       let transparentPixels = 0;
-      const totalSampled = data.length / 16; // Выборочная проверка каждого 4-го пикселя для скорости
+      const totalSampled = data.length / 16;
 
       for (let i = 3; i < data.length; i += 16) {
-        if (data[i] < 128) {
-          transparentPixels++;
-        }
+        if (data[i] < 128) transparentPixels++;
       }
 
       const progress = Math.min(100, (transparentPixels / totalSampled) * 100);
@@ -203,7 +203,7 @@
 
     let targetLeft = maxScroll / 2;
 
-    if (trainWorld.currentView === 'seat') {
+    if (cabinState.currentView === 'seat') {
       const letter = selectedSeat?.id.slice(-1);
       if (letter === 'A' || letter === 'B') {
         targetLeft = maxScroll * 0.22;
@@ -212,7 +212,7 @@
       } else {
         targetLeft = maxScroll * 0.5;
       }
-    } else if (trainWorld.currentView === 'aisle' && callingSeat) {
+    } else if (cabinState.currentView === 'aisle' && callingSeat) {
       const letter = callingSeat.id.slice(-1);
       if (letter === 'A' || letter === 'B') {
         targetLeft = maxScroll * 0.25;
@@ -228,8 +228,7 @@
   }
 
   $effect(() => {
-    // Реактивно отслеживаем переключение режима и выбранное место
-    const view = trainWorld.currentView;
+    const view = cabinState.currentView;
     const seatId = selectedSeat?.id;
     const callId = callingSeat?.id;
 
@@ -504,8 +503,8 @@
       <!-- ЕДИНАЯ КНОПКА УПРАВЛЕНИЯ РЕЙСОМ -->
       <div class="pointer-events-auto">
         {#if isTripFinished}
-          <button 
-            onclick={() => { isDebriefOpen = true; }} 
+          <button
+            onclick={() => { isDebriefOpen = true; }}
             disabled={!trainWorld.isPostTripDone}
             class="px-8 py-3 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-400 hover:from-emerald-500 text-white font-extrabold rounded-full shadow-[0_0_25px_rgba(16,185,129,0.5)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer border border-emerald-300 text-sm tracking-wide disabled:opacity-50 disabled:grayscale disabled:hover:scale-100 disabled:animate-none {trainWorld.isPostTripDone ? 'animate-bounce' : ''}"
           >
@@ -513,15 +512,15 @@
           </button>
         {:else if trainWorld.alertSeatsCount > 0}
           {@const incSeat = trainWorld.seats.find((s) => s.activeIncident != null)}
-          <button 
-            onclick={() => handleCallClick(incSeat?.id)} 
+          <button
+            onclick={() => handleCallClick(incSeat?.id)}
             class="px-6 py-2.5 bg-gradient-to-r from-rose-600 to-amber-500 text-white font-bold rounded-full shadow-[0_0_20px_rgba(244,63,94,0.6)] animate-pulse flex items-center gap-2 cursor-pointer border border-rose-300"
           >
             <span>🚨 Место {incSeat?.id}: требуется решение проводника ➔</span>
           </button>
         {:else if trainWorld.shiftPhase === 'initial_round'}
-          <button 
-            onclick={() => { playSuccessSound(); trainWorld.startCruisePhase(); }} 
+          <button
+            onclick={() => { playSuccessSound(); trainWorld.startCruisePhase(); }}
             disabled={!trainWorld.isPreTripDone}
             class="px-6 py-2.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 font-bold rounded-full shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:grayscale disabled:hover:scale-100"
           >
@@ -547,12 +546,12 @@
         <div class="flex justify-between items-center text-[11px] font-mono text-[#a39e95] uppercase font-semibold">
           <!-- Динамическое текущее время слева -->
           <span class="text-[#f5f3ef] bg-[#282420] px-2 py-0.5 rounded border border-[#3d3831]">🕒 {trainWorld.formattedTime}</span>
-          
+
           <div class="text-center flex flex-col items-center">
             <span class="text-amber-400 text-xs">След: {trainWorld.nextStation?.label || 'Санкт-Петербург Главный'}</span>
             <span class="text-[10px] opacity-70">Прибытие: {trainWorld.nextStation?.plannedTime || '16:15'}</span>
           </div>
-          
+
           <span>С-Петербург (16:15)</span>
         </div>
         <div class="relative w-full h-1.5 bg-[#2d2924] rounded-full mt-1">
@@ -606,7 +605,7 @@
 
   <!-- Оверлей кинематографичного фазового перехода (монтажная склейка) -->
   {#if trainWorld.isPhaseTransitioning}
-    <div 
+    <div
       transition:fade={{ duration: 600 }}
       class="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#050505] text-amber-400"
     >

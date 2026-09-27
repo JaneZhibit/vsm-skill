@@ -11,6 +11,8 @@
   import AchievementToast from './lib/components/AchievementToast.svelte';
   import { authStore } from './lib/stores/authStore.svelte';
   import { trainWorld } from './lib/stores/trainWorld.svelte';
+  import { trainAudio } from './lib/stores/trainAudio.svelte';
+  import { conductorState } from './lib/stores/conductorState.svelte';
 
   let showDebugBar = $state<boolean>(false);
 
@@ -41,21 +43,21 @@
 
         <!-- ДОБАВЛЕННЫЙ БЛОК: Очки в реальном времени -->
         <div class="hidden sm:flex items-center gap-3 ml-4 px-3 py-1 bg-black/50 rounded-lg border border-[#3d3831] text-xs font-mono shadow-inner">
-          <span class="text-amber-400" title="Лояльность">🤝 {trainWorld.loyaltyScore}</span>
-          <span class="text-emerald-400" title="Безопасность">🛡️ {trainWorld.safetyScore}</span>
+          <span class="text-amber-400" title="Лояльность">🤝 {conductorState.loyaltyScore}</span>
+          <span class="text-emerald-400" title="Безопасность">🛡️ {conductorState.safetyScore}</span>
         </div>
       </div>
       <div class="flex items-center gap-2">
         <!-- Кнопка управления фоновым звуком поезда -->
         <button
           data-audio-toggle
-          onclick={() => trainWorld.toggleAudio()}
-          class="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border transition-all cursor-pointer {trainWorld.isAudioMuted
+          onclick={() => trainAudio.toggleAudio()}
+          class="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border transition-all cursor-pointer {trainAudio.isAudioMuted
             ? 'bg-[#282420] border-[#3d3831] text-[#a39e95] hover:text-[#f5f3ef] hover:bg-[#342f2a]'
             : 'bg-amber-950/50 border-amber-500/60 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.3)] hover:bg-amber-900/50'}"
-          title={trainWorld.isAudioMuted ? 'Включить звук поезда' : 'Выключить звук поезда'}
+          title={trainAudio.isAudioMuted ? 'Включить звук поезда' : 'Выключить звук поезда'}
         >
-          {#if trainWorld.isAudioMuted}
+          {#if trainAudio.isAudioMuted}
             <span class="text-xs">🔇</span>
             <span>Звук выкл</span>
           {:else}

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import { trainWorld } from '../stores/trainWorld.svelte';
+  import { physicsState } from '../stores/trainPhysics.svelte';
 
   // 3 информационных экрана с ротацией каждые 4 секунды
   let currentScreen = $state<number>(0);
@@ -17,7 +18,7 @@
   });
 
   const nextStationName = $derived.by(() => {
-    const cp = trainWorld.nextCheckpoint;
+    const cp = physicsState.nextCheckpoint;
     if (!cp) return 'Санкт-Петербург';
     return cp.checkpoint.label.replace(' (вокзал)', '').trim();
   });
@@ -34,7 +35,7 @@
       <!-- Экран 1: Скорость и вагон -->
       <div in:fade={{ duration: 250 }} class="led-content">
         <span class="led-icon">🚄</span>
-        <span class="led-text font-bold">{Math.round(trainWorld.speed)} км/ч</span>
+        <span class="led-text font-bold">{Math.round(physicsState.speed)} км/ч</span>
         <span class="led-divider">•</span>
         <span class="led-text">Вг {trainWorld.wagonNumber} [{trainWorld.wagonType}]</span>
       </div>
@@ -42,7 +43,7 @@
       <!-- Экран 2: Время и следующая станция -->
       <div in:fade={{ duration: 250 }} class="led-content">
         <span class="led-icon">🕒</span>
-        <span class="led-text font-bold">{trainWorld.formattedTime}</span>
+        <span class="led-text font-bold">{physicsState.formattedTime}</span>
         <span class="led-divider">•</span>
         <span class="led-text">След: {nextStationName}</span>
       </div>

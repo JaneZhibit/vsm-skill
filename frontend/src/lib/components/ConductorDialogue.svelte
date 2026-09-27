@@ -1,578 +1,1346 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
-  import { fade, fly } from 'svelte/transition';
+  import { fly, fade } from 'svelte/transition';
   import { trainWorld } from '../stores/trainWorld.svelte';
-  import { trainAudio } from '../stores/trainAudio.svelte';
+  import { cabinState } from '../stores/cabinState.svelte';
+  import { physicsState } from '../stores/trainPhysics.svelte';
   import { conductorState } from '../stores/conductorState.svelte';
-  import type { ActiveIncident } from '../config/cabinConfig';
-  import { playSuccessSound, playErrorSound, playClickSound } from '../utils/audio';
+  import ConductorDialogue from './ConductorDialogue.svelte';
+  import CeilingDisplay from './CeilingDisplay.svelte';
+  import SeatMapModal from './SeatMapModal.svelte';
+  import ShiftDebriefModal from './ShiftDebriefModal.svelte';
+  import { playCallBell, playClickSound, playSuccessSound } from '../utils/audio';
 
-  type Stage = 'decision' | 'feedback' | 'learning_card';
+  let isSeatMapOpen = $state<boolean>(false);
+  let isResetConfirmOpen = $state<boolean>(false);
+  let isDebriefOpen = $state<boolean>(false);
 
-  let currentSeat = $derived(trainWorld.selectedSeat);
-  let activeIncident = $derived(currentSeat?.activeIncident);
-  let dialogIncident = $state<ActiveIncident | null>(trainWorld.selectedSeat?.activeIncident || null);
-  let currentIncident = $derived<ActiveIncident | null>(dialogIncident || activeIncident || null);
-  
-  let currentStepId = $state<string>('step_1');
-  let currentStep = $derived<any>(currentIncident?.steps?.[currentStepId] || currentIncident || { options: [] });
+  let selectedSeat = $derived(cabinState.selectedSeat);
+  let callingSeat = $derived(
+    cabinState.seats.find(
+      (s) =>
+        s.activeIncident != null &&
+        (typeof s.activeIncident === 'string' || s.activeIncident.phase !== 'passive')
+    )
+  );
+  const isTripFinished = $derived(
+    physicsState.currentKm >= 678.5 || physicsState.timeSeconds >= 58500
+  );
+  const isCabinEmpty = $derived(
+    conductorState.shiftPhase === 'initial_round' ||
+    conductorState.shiftPhase === 'arrival' ||
+    isTripFinished ||
+    cabinState.occupiedSeatsCount === 0
+  );
+  const cabinImageSrc = $derived(
+    isCabinEmpty ? '/assets/cabin.png' : '/assets/cabin_aisle_transparent.png'
+  );
 
-  let isEditingVoice = $state<boolean>(false);
-  let editableTranscript = $state<string>('');
+  function getSeatCoords(seatId: string) {
+    const row = parseInt(seatId.slice(0, -1)) || 2;
+    const letter = seatId.slice(-1);
+    const isLeft = letter === 'A' || letter === 'B';
 
-  // --- ЛОГИКА РЕЖИМОВ ---
-  let isProMode = $derived(trainWorld.tripMode === 'pro');
-  let conductorGender = $derived(conductorState.conductorProfile.gender);
+    // Ряд 1 - ближе к проводнику (низ экрана), Ряд 12 - вдалеке у двери
+    const depth = Math.min(1, Math.max(0, (row - 1) / 11));
 
-  let stage = $state<Stage>('decision');
-  let timeLeft = $state<number>(0);
-  let selectedOption = $state<any>(null);
-  let pendingNextStep = $state<string | null>(null);
-  let isTimeout = $state<boolean>(false);
-  let timerInterval: ReturnType<typeof setInterval> | null = null;
-  let feedbackResult = $state<any>(null);
+    // По вертикали: ряд 1 на 62%, ряд 12 на 34%
+    const top = 62 - depth * 28;
+    // По горизонтали: левая сторона сходится к центру (18% -> 43%), правая (82% -> 57%)
+    const left = isLeft ? 18 + depth * 25 : 82 - depth * 25;
+    const scale = 1.05 - depth * 0.4;
 
-  // --- ГОЛОС (Web Speech API - Распознавание в браузере) ---
-  let isRecording = $state<boolean>(false);
-  let recordingSeconds = $state<number>(0);
-  let recordingTimer: ReturnType<typeof setInterval> | null = null;
-  let isAnalyzingVoice = $state<boolean>(false);
-  let micError = $state<string | null>(null);
-  
-  let recognition: any = null;
-  let finalTranscript = $state<string>('');
-  let interimTranscript = $state<string>('');
+    return { top: `${top}%`, left: `${left}%`, scale, isLeft };
+  }
 
-  // --- ДАННЫЕ UI ---
-  let formattedSeconds = $derived(Math.ceil(timeLeft).toString().padStart(2, '0'));
-  let formattedRecordTimer = $derived(`00:${recordingSeconds.toString().padStart(2, '0')}`);
-  let passengerName = $derived(currentSeat?.isOccupied ? (currentSeat.passenger?.full_name || 'Пассажир') : 'Свободное место');
-
-  // Динамические кнопки (Добавляем помощь для девушек)
-  let dynamicOptions = $derived.by(() => {
-    let opts = currentStep?.options || currentIncident?.options || [];
-    if (!isProMode && currentIncident?.incident_id === 'inc_luggage_aisle_01' && conductorGender === 'f') {
-      if (!opts.find((o: any) => o.id === 'opt_ask_male')) {
-        opts = [...opts, {
-          id: 'opt_ask_male',
-          text: '«Мужчина, не могли бы вы помочь закинуть чемодан пассажиру?»',
-          action_type: 'click',
-          result: {
-            loyalty_delta: 20, safety_delta: 30, mood: 'calm',
-            feedback: "Отличная работа! Вы делегировали тяжелую физическую работу, сохранив свое здоровье и решив проблему безопасности (СТО РЖД)."
-          }
-        }];
+  function handleCallClick(seatId?: string) {
+    playCallBell();
+    if (seatId) {
+      cabinState.inspectSeat(seatId);
+    } else {
+      const callingSeat = cabinState.seats.find((s) => s.activeIncident != null);
+      if (callingSeat) {
+        cabinState.inspectSeat(callingSeat.id);
       }
     }
-    return opts;
-  });
+  }
 
-  // --- ТЕКСТ ДИАЛОГА (МГНОВЕННЫЙ И РЕАКТИВНЫЙ) ---
-  let fullDialogueText = $derived.by(() => {
-    // 1. Если мы на этапе разбора - выводим ответ пассажира
-    if (stage === 'feedback') {
-      if (feedbackResult?.passenger_reply) {
-        const reply = feedbackResult.passenger_reply;
-        return reply.startsWith('«') ? reply : `«${reply}»`;
-      }
-      if (feedbackResult?.feedback) {
-        return `«${feedbackResult.feedback}»`;
-      }
-      return '';
+  function handleBackToAisle() {
+    playClickSound();
+    cabinState.switchView('aisle');
+  }
+
+  function handlePrevSeat() {
+    playClickSound();
+    cabinState.prevOccupiedSeat();
+    if (cabinState.selectedSeat) {
+      cabinState.inspectSeat(cabinState.selectedSeat.id);
     }
-    // 2. Если есть активный инцидент - выводим заготовленный промпт
-    const inc = currentIncident;
-    if (inc) {
-      const rawPrompt = currentStep?.prompt ?? inc?.prompt;
-      if (rawPrompt) {
-        if (typeof rawPrompt === 'object' && rawPrompt !== null) {
-          const archId = currentSeat?.passenger?.archetype_id || 'male_young';
-          const trait = currentSeat?.passenger?.trait || 'polite';
-          return rawPrompt[`${archId}_${trait}`] || rawPrompt[trait] || rawPrompt[archId] || rawPrompt['default'] || '';
-        }
-        return String(rawPrompt);
-      }
+  }
+
+  function handleNextSeat() {
+    playClickSound();
+    cabinState.nextOccupiedSeat();
+    if (cabinState.selectedSeat) {
+      cabinState.inspectSeat(cabinState.selectedSeat.id);
     }
-    // 3. Иначе - пассажир молчит!
-    return ''; 
-  });
+  }
 
-  let displayedText = $derived(fullDialogueText);
+  function handleOpenSeatMap() {
+    playClickSound();
+    isSeatMapOpen = true;
+  }
 
-  // --- УПРАВЛЕНИЕ ЖИЗНЕННЫМ ЦИКЛОМ ИНЦИДЕНТА ---
-  let currentSeatId = $derived(currentSeat?.id);
-  let boundSeatId = trainWorld.selectedSeat?.id || '';
-  let initializedIncidentId = '';
+  async function handleConfirmNewTrip() {
+    playSuccessSound();
+    isResetConfirmOpen = false;
+    await trainWorld.startNewTrip();
+  }
+
+  // --- МИНИ-ИГРА: УБОРКА ВАГОНА ГУБКОЙ ---
+  let dirtCanvas = $state<HTMLCanvasElement | null>(null);
+  let dirtCtx: CanvasRenderingContext2D | null = null;
+  let isErasing = false;
+  let lastPoint: { x: number; y: number } | null = null;
+  let isDirtCanvasInitialized = false;
 
   $effect(() => {
-    // Смена выбранного кресла проводником
-    if (currentSeatId !== boundSeatId) {
-      boundSeatId = currentSeatId || '';
-      initializedIncidentId = '';
-      resetDialogState();
-    }
-
-    // Инициализация инцидента на выбранном кресле
-    if (activeIncident && stage === 'decision') {
-      if (activeIncident.incident_id !== initializedIncidentId) {
-        initializedIncidentId = activeIncident.incident_id;
-        dialogIncident = activeIncident;
-        currentStepId = activeIncident.start_step || 'step_1';
-        timeLeft = currentStep?.timer_seconds || activeIncident.timer_seconds || 30;
-        trainAudio.setAmbientDucking(true);
-        if (currentSeat?.passenger) {
-          trainWorld.playPassengerDialog(
-            activeIncident.incident_id,
-            currentSeat.passenger.archetype_id,
-            currentSeat.passenger.trait
-          );
+    const isArrival = conductorState.shiftPhase === 'arrival' || isTripFinished;
+    if (isArrival && dirtCanvas && !isDirtCanvasInitialized) {
+      isDirtCanvasInitialized = true;
+      dirtCtx = dirtCanvas.getContext('2d', { willReadFrequently: true });
+      const img = new Image();
+      img.src = '/assets/cabin_dirty.png';
+      img.onload = () => {
+        if (dirtCanvas && dirtCtx) {
+          dirtCanvas.width = img.naturalWidth || 1671;
+          dirtCanvas.height = img.naturalHeight || 941;
+          dirtCtx.drawImage(img, 0, 0, dirtCanvas.width, dirtCanvas.height);
         }
-        startTimer();
-      }
+      };
+    } else if (!isArrival) {
+      isDirtCanvasInitialized = false;
     }
   });
 
-  function resetDialogState() {
-    dialogIncident = null;
-    initializedIncidentId = '';
-    stopTimer();
-    stopRecording(false);
-    stage = 'decision';
-    currentStepId = 'step_1';
-    feedbackResult = null;
-    isTimeout = false;
-    isEditingVoice = false;
-    editableTranscript = '';
-    trainAudio.setAmbientDucking(false);
+  function getPointerPos(e: MouseEvent | TouchEvent) {
+    if (!dirtCanvas) return { x: 0, y: 0 };
+    const rect = dirtCanvas.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const scaleX = dirtCanvas.width / rect.width;
+    const scaleY = dirtCanvas.height / rect.height;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY
+    };
   }
 
-  // --- ТАЙМЕРЫ ---
-  function startTimer() {
-    isTimeout = false;
-    stopTimer();
-    timerInterval = setInterval(() => {
-      if (stage !== 'decision') return;
-      if (timeLeft > 0.1) timeLeft = Math.max(0, Math.round((timeLeft - 0.1) * 10) / 10);
-      else triggerTimeout();
-    }, 100);
+  function startErasing(e: MouseEvent | TouchEvent) {
+    isErasing = true;
+    lastPoint = getPointerPos(e);
+    erase(e);
   }
-  function stopTimer() {
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      timerInterval = null;
+
+  function stopErasing() {
+    if (isErasing) {
+      isErasing = false;
+      lastPoint = null;
+      checkCleaningProgress();
     }
   }
 
-  async function triggerTimeout() {
-    const incId = currentIncident?.incident_id;
-    if (!incId) return;
-    stopTimer();
-    stopRecording();
-    isTimeout = true;
-    stage = 'feedback';
-    playErrorSound();
-    feedbackResult = await trainWorld.resolveIncident(incId, 'opt_timeout');
-  }
+  function erase(e: MouseEvent | TouchEvent) {
+    if (!isErasing || !dirtCtx || !dirtCanvas) return;
+    const currentPoint = getPointerPos(e);
 
-  // --- ЛОГИКА ДЕЙСТВИЙ ---
-  async function executeOption(opt: any) {
-    if (opt.why_correct || opt.what_if_wrong) {
-      selectedOption = opt;
-      if (opt.next_step) {
-        stopTimer();
-        pendingNextStep = opt.next_step;
-        stage = 'learning_card';
-        playClickSound();
-        return;
-      }
-    }
-    if (opt.next_step) {
-      currentStepId = opt.next_step;
-      timeLeft = currentIncident?.steps?.[opt.next_step]?.timer_seconds || 30;
-      playClickSound();
+    dirtCtx.globalCompositeOperation = 'destination-out';
+    dirtCtx.lineWidth = 160; // Диаметр "губки" (увеличен для мобилок)
+    dirtCtx.lineCap = 'round';
+    dirtCtx.lineJoin = 'round';
+
+    dirtCtx.beginPath();
+    if (lastPoint) {
+      dirtCtx.moveTo(lastPoint.x, lastPoint.y);
+      dirtCtx.lineTo(currentPoint.x, currentPoint.y);
+      dirtCtx.stroke();
     } else {
-      stopTimer();
-      stage = 'feedback';
-      const incId = currentIncident?.incident_id;
-      if (incId) {
-        feedbackResult = await trainWorld.resolveIncident(incId, opt.id);
-      }
-      if (feedbackResult?.loyalty_delta > 0 || feedbackResult?.is_passed) playSuccessSound(); else playErrorSound();
+      dirtCtx.arc(currentPoint.x, currentPoint.y, 60, 0, Math.PI * 2);
+      dirtCtx.fill();
     }
+    lastPoint = currentPoint;
   }
 
-  // --- ЛОГИКА ГОЛОСА (Web Speech API) ---
-  async function startRecording() {
-    stopTimer();
-    micError = null;
-    finalTranscript = '';
-    interimTranscript = '';
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      micError = 'Ваш браузер не поддерживает распознавание речи (используйте Chrome/Edge).';
-      playErrorSound();
-      return;
-    }
-
-    if (!recognition) {
-      recognition = new SpeechRecognition();
-      recognition.lang = 'ru-RU';
-      recognition.continuous = true;
-      recognition.interimResults = true;
-
-      recognition.onresult = (event: any) => {
-        let interim = '';
-        let final = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            final += transcript + ' ';
-          } else {
-            interim += transcript;
-          }
-        }
-        finalTranscript += final;
-        interimTranscript = interim;
-      };
-
-      recognition.onerror = (event: any) => {
-        if (event.error === 'not-allowed') micError = 'Доступ к микрофону запрещен.';
-      };
-
-      // Браузер иногда сам останавливает запись при паузах. Этот перезапуск поддерживает ее.
-      recognition.onend = () => {
-        if (isRecording) {
-          try { recognition.start(); } catch(e) {}
-        }
-      };
-    }
-
+  function checkCleaningProgress() {
+    if (!dirtCtx || !dirtCanvas) return;
     try {
-      recognition.start();
-      isRecording = true;
-      recordingSeconds = 0;
-      recordingTimer = setInterval(() => recordingSeconds++, 1000);
-      playClickSound();
+      const imgData = dirtCtx.getImageData(0, 0, dirtCanvas.width, dirtCanvas.height);
+      const data = imgData.data;
+      let transparentPixels = 0;
+      const totalSampled = data.length / 16; // Выборочная проверка каждого 4-го пикселя для скорости
+
+      for (let i = 3; i < data.length; i += 16) {
+        if (data[i] < 128) {
+          transparentPixels++;
+        }
+      }
+
+      const progress = Math.min(100, (transparentPixels / totalSampled) * 100);
+      const wasDone = trainWorld.isPostTripDone;
+      trainWorld.cleaningProgress = progress;
+
+      if (progress >= 70 && !wasDone) {
+        playSuccessSound();
+        trainWorld.showToast('Вагон сияет!', 'Вы отлично справились с уборкой.');
+      }
     } catch (err) {
-      micError = 'Не удалось запустить микрофон.';
+      console.error('Ошибка подсчета чистоты:', err);
     }
   }
 
-  function stopRecording(sendData = true) {
-    if (isRecording) {
-      isRecording = false;
-      if (recordingTimer) clearInterval(recordingTimer);
-      if (recognition) {
-        try { recognition.stop(); } catch(e) {}
-      }
-      playClickSound();
+  let scrollAreaEl = $state<HTMLElement | null>(null);
 
-      if (sendData) {
-        // Вместо мгновенной отправки, открываем редактор
-        editableTranscript = (finalTranscript + ' ' + interimTranscript).trim();
-        if (editableTranscript) {
-          isEditingVoice = true; // Открываем режим редактирования
-        } else {
-          micError = 'Вы ничего не сказали. Попробуйте еще раз.';
-          playErrorSound();
-          if (stage === 'decision' && currentIncident) startTimer();
-        }
+  function centerScroll(smooth = true) {
+    if (!scrollAreaEl) return;
+    const maxScroll = scrollAreaEl.scrollWidth - scrollAreaEl.clientWidth;
+    if (maxScroll <= 0) return;
+
+    let targetLeft = maxScroll / 2;
+
+    if (cabinState.currentView === 'seat') {
+      const letter = selectedSeat?.id.slice(-1);
+      if (letter === 'A' || letter === 'B') {
+        targetLeft = maxScroll * 0.22;
+      } else if (letter === 'C' || letter === 'D') {
+        targetLeft = maxScroll * 0.78;
       } else {
-        if (stage === 'decision' && currentIncident) startTimer();
+        targetLeft = maxScroll * 0.5;
+      }
+    } else if (cabinState.currentView === 'aisle' && callingSeat) {
+      const letter = callingSeat.id.slice(-1);
+      if (letter === 'A' || letter === 'B') {
+        targetLeft = maxScroll * 0.25;
+      } else if (letter === 'C' || letter === 'D') {
+        targetLeft = maxScroll * 0.75;
       }
     }
+
+    scrollAreaEl.scrollTo({
+      left: targetLeft,
+      behavior: smooth ? 'smooth' : 'auto'
+    });
   }
 
-  // Функция для итоговой отправки отредактированного текста
-  function submitEditedText() {
-    isEditingVoice = false;
-    handleTextRecorded(editableTranscript);
+  $effect(() => {
+    // Реактивно отслеживаем переключение режима и выбранное место
+    const view = cabinState.currentView;
+    const seatId = selectedSeat?.id;
+    const callId = callingSeat?.id;
+
+    const timer = setTimeout(() => {
+      centerScroll(true);
+    }, 120);
+
+    return () => clearTimeout(timer);
+  });
+
+  function handleWindowResize() {
+    centerScroll(false);
   }
-
-  async function handleTextRecorded(text: string) {
-    const inc = currentIncident;
-    isAnalyzingVoice = true; 
-    stopTimer();
-
-    // Воспроизводим аудио-филлер на время ожидания ответа ИИ
-    let fillerAudio: HTMLAudioElement | null = null;
-    if (!trainWorld.isAudioMuted) {
-      const fillerNum = Math.floor(Math.random() * 3) + 1;
-      fillerAudio = new Audio(`/storage/audio/fillers/filler_${fillerNum}.mp3`);
-      fillerAudio.volume = 0.75;
-      fillerAudio.play().catch(() => {});
-    }
-
-    try {
-      // Если инцидента нет, мы передаем ID кресла (например "2A") вместо incident_id!
-      const targetId = inc?.incident_id || currentSeat?.id || 'free_talk';
-      const res = await trainWorld.resolveVoiceIncident(
-        targetId, 
-        null, 
-        text, 
-        String(fullDialogueText), 
-        currentStep?.expected_rule || 'Свободное вежливое общение'
-      );
-
-      // Глушим филлер, когда получен ответ от сервера
-      if (fillerAudio) {
-        fillerAudio.pause();
-        fillerAudio.currentTime = 0;
-      }
-
-      feedbackResult = res?.incident_result || res;
-      stage = 'feedback';
-
-      if (feedbackResult?.loyalty_delta >= 0 || feedbackResult?.is_passed) playSuccessSound(); else playErrorSound();
-
-      if (feedbackResult?.passenger_audio_base64 && !trainWorld.isAudioMuted) {
-        setTimeout(() => {
-          const audio = new Audio(`data:audio/mp3;base64,${feedbackResult.passenger_audio_base64}`);
-          audio.volume = 0.9;
-          audio.play().catch(e => console.warn("Audio autoplay blocked", e));
-        }, 50);
-      }
-
-    } catch (e) {
-      if (fillerAudio) {
-        fillerAudio.pause();
-        fillerAudio.currentTime = 0;
-      }
-      playErrorSound();
-    } finally {
-      isAnalyzingVoice = false;
-    }
-  }
-
-  function handleComplete() {
-    playClickSound(); resetDialogState();
-  }
-
-  onDestroy(resetDialogState);
 </script>
 
-<!-- ОСНОВНОЙ КОНТЕЙНЕР ДИАЛОГА -->
-<div class="vn-dialogue-box" transition:fly={{ y: 40, duration: 200 }}>
-  {@render Header()}
-  
-  <div
-    class="vn-speech-area"
-    role="region"
-    aria-label="Реплика"
-  >
-    <p class="speech-quote {currentIncident || stage === 'feedback' ? 'speech-urgent' : 'text-stone-400 not-italic text-sm'}">
-      {#if displayedText}
-        {displayedText}
-      {:else}
-        {currentSeat?.isOccupied ? 'Пассажир отдыхает.' : 'Кресло свободно.'}
-      {/if}
-    </p>
-  </div>
+<!-- Контейнер экрана -->
+<svelte:window onresize={handleWindowResize} />
 
-  <div class="vn-actions-bar">
-    {#if currentIncident || stage === 'feedback'}
-      {#if stage === 'decision'}
-        {#if isProMode}
-          {@render VoiceInterface()}
-        {:else}
-          {@render ChoicesInterface()}
-        {/if}
-      {:else if stage === 'learning_card'}
-        {@render LearningCardInterface()}
-      {:else}
-        {@render FeedbackInterface()}
-      {/if}
-    {:else}
-      <!-- СВОБОДНЫЙ ДИАЛОГ (FREE-TALK) С ПАССАЖИРОМ В ЛЮБОЙ МОМЕНТ -->
-      {#if currentSeat?.isOccupied && isProMode}
-        <div class="flex flex-col w-full gap-2">
-          {@render VoiceInterface()}
-          <div class="flex gap-2 justify-end pt-1 border-t border-[#3d3831]/50">
-            {#if currentSeat.ticketStatus !== 'validated'}
-              <button class="action-btn text-emerald-300 text-xs" onclick={() => trainWorld.validateCurrentSeat()}>📲 Проверить (АСКП)</button>
-            {/if}
-            <button class="action-btn text-stone-400 text-xs" onclick={() => trainWorld.switchView('aisle')}>⬅ В проход</button>
+<div class="cabin-viewport">
+  <!-- Системный плавающий тост событий станции / оповещений проводника -->
+  {#if trainWorld.stationToast}
+    <div class="station-toast-overlay" transition:fly={{ y: -20, duration: 250 }}>
+      <div class="toast-card">
+        <div class="toast-title">{trainWorld.stationToast.title}</div>
+        <div class="toast-subtitle">{trainWorld.stationToast.subtitle}</div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Верхний фиксированный HUD-слой (не зависит от горизонтального скролла) -->
+  <div class="hud-top-bar">
+    {#if cabinState.currentView === 'aisle'}
+      <!-- Статус-баннер текущей фазы смены проводника -->
+      <div class="aisle-phase-banner">
+        {#if conductorState.shiftPhase === 'initial_round'}
+          <div class="phase-banner-content phase-round">
+            <span class="phase-text">
+              📋 <strong>Приемка вагона (13:50)</strong> • Вагон пуст. Проверьте оборудование перед рейсом.
+            </span>
           </div>
-        </div>
-      {:else}
-        <div class="flex gap-2 justify-end">
-          {#if currentSeat?.isOccupied && currentSeat.ticketStatus !== 'validated'}
-            <button class="action-btn text-emerald-300" onclick={() => trainWorld.validateCurrentSeat()}>📲 Проверить (АСКП)</button>
+        {:else if conductorState.shiftPhase === 'cruise'}
+          <div class="phase-banner-content phase-cruise">
+            <span class="phase-pulse-dot"></span>
+            <span class="phase-text">
+              ⚡ <strong>В пути ({Math.round(physicsState.speed)} км/ч)</strong>
+            </span>
+          </div>
+        {:else if conductorState.shiftPhase === 'station_warning' || conductorState.shiftPhase === 'tver_warning'}
+          <div class="phase-banner-content phase-warning">
+            <span class="phase-text">
+              ⚠️ <strong>{physicsState.nextStation?.label || 'ст. Тверь'} через 10 мин</strong> • На выход: {cabinState.getNextStationExitingPassengers(physicsState.nextStation?.label || '').length} пасс. ({cabinState.nextStationRemindedCount}/{cabinState.nextStationExitingPassengers.length})
+            </span>
+          </div>
+        {:else}
+          <div class="phase-banner-content phase-arrival">
+            <span class="phase-text">
+              🏁 <strong>{physicsState.currentKm >= 679 ? 'Санкт-Петербург Главный' : 'Стоянка на станции'}</strong> • {physicsState.currentKm >= 679 ? 'Рейс № 754 успешно завершен' : 'Посадка/высадка'}
+            </span>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Верхний правый блок действий: Схема вагона -->
+      <div class="top-actions-cluster">
+        <button onclick={handleOpenSeatMap} class="seat-map-trigger-btn" title="Открыть интерактивную схему мест вагона">
+          <span class="trigger-icon">📋</span>
+          <span class="trigger-text">Схема ({cabinState.occupiedSeatsCount}/48)</span>
+          {#if cabinState.alertSeatsCount > 0}
+            <span class="trigger-alert-badge">
+              <span class="trigger-alert-ping"></span>
+              {cabinState.alertSeatsCount}
+            </span>
           {/if}
-          <button class="action-btn text-stone-400" onclick={() => trainWorld.switchView('aisle')}>⬅ В проход</button>
+        </button>
+      </div>
+    {:else}
+      <!-- Верхняя панель быстрого обхода пассажиров -->
+      <div class="seat-top-bar">
+        <div class="seat-stepper-mini">
+          <button onclick={handlePrevSeat} class="stepper-mini-btn" title="Предыдущий занятый пассажир">
+            ◀ Пред
+          </button>
+          <button onclick={handleOpenSeatMap} class="stepper-mini-seat" title="Открыть карту мест">
+            💺 Место {selectedSeat?.id || '—'}
+          </button>
+          <button onclick={handleNextSeat} class="stepper-mini-btn" title="Следующий занятый пассажир">
+            След ▶
+          </button>
         </div>
-      {/if}
+      </div>
     {/if}
   </div>
+
+  <!-- ОСНОВНАЯ ЗОНА СЦЕНЫ (2.5D Салон с горизонтальным скроллом) -->
+  <div class="scene-scroll-area hide-scrollbar" bind:this={scrollAreaEl}>
+    {#if cabinState.currentView === 'aisle'}
+      <!-- Общий вид вагона (патрулирование) -->
+      <div
+        class="scene-container aisle-scene"
+        class:high-speed-shake={physicsState.speed > 250 && !physicsState.isPaused}
+        class:ambient-sway={physicsState.speed > 5 && !physicsState.isPaused}
+      >
+        <!-- ================= ЛЕВЫЕ ОКНА ================= -->
+        <div class="window-viewport left-viewport">
+          <!-- Небо -->
+          <div
+            class="parallax-layer sky-layer"
+            class:is-moving={physicsState.speed > 5 && !physicsState.isPaused}
+          ></div>
+          <!-- Земля -->
+          <div
+            class="parallax-layer ground-layer"
+            class:is-moving={physicsState.speed > 5 && !physicsState.isPaused}
+          ></div>
+        </div>
+
+        <!-- ================= ПРАВЫЕ ОКНА ================= -->
+        <div class="window-viewport right-viewport">
+          <!-- Небо -->
+          <div
+            class="parallax-layer sky-layer"
+            class:is-moving={physicsState.speed > 5 && !physicsState.isPaused}
+          ></div>
+          <!-- Земля -->
+          <div
+            class="parallax-layer ground-layer"
+            class:is-moving={physicsState.speed > 5 && !physicsState.isPaused}
+          ></div>
+        </div>
+
+        <!-- СЛОЙ 1В: Платформа станции (плавно проявляется при остановке) -->
+        <div
+          class="station-platform-layer"
+          class:platform-visible={physicsState.speed < 5 && physicsState.movementStatus.includes('Стоянка')}
+        ></div>
+
+        <!-- СЛОЙ 2: Салон (с людьми в пути или пустой cabin.png при приемке / прибытии) -->
+        <img
+          src={cabinImageSrc}
+          alt="Вагон"
+          class="base-image cabin-overlay"
+        />
+
+        <CeilingDisplay />
+
+        <!-- === МИНИ-ИГРА: ПРИЕМКА ВАГОНА (ПЕРЕД ОТПРАВЛЕНИЕМ) === -->
+        {#if conductorState.shiftPhase === 'initial_round'}
+          {#if !trainWorld.preTripChecks.fireExtinguisher}
+            <button class="interactive-hotspot" style="top: 55%; left: 10%;" onclick={() => { trainWorld.preTripChecks.fireExtinguisher = true; playSuccessSound(); trainWorld.showToast('Приемка', 'Огнетушитель проверен (пломба на месте).'); }}>
+              <span class="hotspot-ping"></span>🧯
+            </button>
+          {/if}
+          {#if !trainWorld.preTripChecks.climate}
+            <button class="interactive-hotspot" style="top: 30%; left: 90%;" onclick={() => { trainWorld.preTripChecks.climate = true; playSuccessSound(); trainWorld.showToast('Приемка', 'Щит управления: климат в норме (+22°C).'); }}>
+              <span class="hotspot-ping"></span>🌡️
+            </button>
+          {/if}
+          {#if !trainWorld.preTripChecks.toilet}
+            <button class="interactive-hotspot" style="top: 45%; left: 45%; transform: scale(0.6);" onclick={() => { trainWorld.preTripChecks.toilet = true; playSuccessSound(); trainWorld.showToast('Приемка', 'Санузел проверен: вода и бумага в наличии.'); }}>
+              <span class="hotspot-ping"></span>🚻
+            </button>
+          {/if}
+        {/if}
+
+        <!-- === МИНИ-ИГРА: СТИРАНИЕ ГРЯЗИ ГУБКОЙ (ПРИБЫТИЕ) === -->
+        {#if conductorState.shiftPhase === 'arrival' || isTripFinished}
+          <canvas
+            bind:this={dirtCanvas}
+            class="absolute inset-0 w-full h-full z-[3] touch-pan-x cursor-crosshair"
+            onmousedown={startErasing}
+            onmousemove={erase}
+            onmouseup={stopErasing}
+            onmouseleave={stopErasing}
+            ontouchstart={startErasing}
+            ontouchmove={erase}
+            ontouchend={stopErasing}
+          ></canvas>
+
+          {#if trainWorld.cleaningProgress < 70}
+            <div class="absolute top-20 left-1/2 -translate-x-1/2 z-[4] bg-stone-900/90 text-amber-400 border border-amber-500/40 px-6 py-2 rounded-full font-bold shadow-2xl backdrop-blur animate-pulse pointer-events-none text-sm flex items-center gap-2">
+              <span>🧼</span>
+              <span>Сотрите грязь и мусор губкой: {Math.round(trainWorld.cleaningProgress)}% / 70%</span>
+            </div>
+          {/if}
+        {/if}
+
+        <!-- Индикатор активного вызова проводника и пространственная подсветка -->
+        {#if callingSeat}
+          {@const pos = getSeatCoords(callingSeat.id)}
+
+          <!-- Пульсирующее красное световое пятно над рядом (Ambient Alert Halo) -->
+          <div
+            class="absolute pointer-events-none z-20 w-32 h-32 rounded-full -translate-x-1/2 -translate-y-1/2 bg-rose-600/30 blur-2xl animate-pulse"
+            style="top: {pos.top}; left: {pos.left};"
+          ></div>
+
+          <!-- Динамический бейдж вызова точно над креслом в перспективе -->
+          <button
+            onclick={() => handleCallClick(callingSeat.id)}
+            class="aisle-call-badge"
+            style="top: {pos.top}; left: {pos.left}; transform: translate(-50%, -50%) scale({pos.scale});"
+            title="Подойти к месту {callingSeat.id}"
+          >
+            <span class="call-ping"></span>
+            <!-- Добавлен таймер реакции! -->
+            🛎️ Место {callingSeat.id} • Ожидание: {Math.ceil(trainWorld.reactionTimeLeft)} сек ➔
+          </button>
+        {/if}
+
+        <!-- Пассивные пассажиры в проходе (скрытый 👁️, нетрезвый 🍺, спящий 💤) -->
+        {#each cabinState.seats.filter(s => s.isOccupied && ((s.activeIncident && typeof s.activeIncident === 'object' && s.activeIncident.phase === 'passive') || s.condition === 'drunk' || s.condition === 'sleeping')) as passiveSeat}
+          {#if !callingSeat || callingSeat.id !== passiveSeat.id}
+            {@const ppos = getSeatCoords(passiveSeat.id)}
+            <button
+              onclick={() => handleCallClick(passiveSeat.id)}
+              class="aisle-call-badge !bg-stone-900/90 !border-amber-500/60 hover:!bg-stone-800 text-amber-200"
+              style="top: {ppos.top}; left: {ppos.left}; transform: translate(-50%, -50%) scale({ppos.scale * 0.85});"
+              title="Подойти к месту {passiveSeat.id}"
+            >
+              <span>
+                {#if passiveSeat.activeIncident && typeof passiveSeat.activeIncident === 'object' && passiveSeat.activeIncident.phase === 'passive'}
+                  👁️ Место {passiveSeat.id}
+                {:else if passiveSeat.condition === 'drunk'}
+                  🍺 Место {passiveSeat.id}
+                {:else}
+                  💤 Место {passiveSeat.id}
+                {/if}
+              </span>
+            </button>
+          {/if}
+        {/each}
+      </div>
+    {:else}
+      <!-- Вид кресла с пассажиром (диалог / осмотр) -->
+      <div
+        class="scene-container seat-scene"
+        class:ambient-sway={physicsState.speed > 5 && !physicsState.isPaused}
+      >
+        <!-- 1. Базовый фон (задает правильный размер без обрезки) -->
+        <img src="/assets/seat_bg.png" alt="Салон" class="base-image" />
+
+        <!-- 2. Пассажир (динамический спрайт) -->
+        {#if selectedSeat?.isOccupied && selectedSeat?.passenger}
+          {@const p = selectedSeat.passenger}
+          {@const rawSprite = cabinState.currentPassengerSprite || p.sprite_url || ''}
+          {@const cleanSprite = rawSprite.replace('/assets/passengers/', '/assets/')}
+          <img
+            src={cleanSprite}
+            alt={p.full_name}
+            class="passenger-overlay"
+            onerror={(e) => {
+              const target = e.currentTarget as HTMLImageElement;
+              target.src = `/assets/${p.archetype_id}/neutral.png`;
+            }}
+          />
+        {:else if !isCabinEmpty && cabinState.passengerMood !== 'empty'}
+          <img
+            src={cabinState.passengerMood === 'calm'
+              ? '/assets/passenger_calm.png'
+              : '/assets/passenger_annoyed.png'}
+            alt="Пассажир"
+            class="passenger-overlay"
+          />
+        {/if}
+      </div>
+    {/if}
+  </div>
+
+  <!-- РАЗДЕЛЕННЫЙ НИЖНИЙ БЛОК ДЕЙСТВИЙ (В проходе — шкала и кнопки, в кресле — диалог) -->
+  {#if cabinState.currentView === 'aisle'}
+    <div class="bottom-ui-panel">
+      <!-- ЕДИНАЯ КНОПКА УПРАВЛЕНИЯ РЕЙСОМ -->
+      <div class="pointer-events-auto">
+        {#if isTripFinished}
+          <button
+            onclick={() => { isDebriefOpen = true; }}
+            disabled={!trainWorld.isPostTripDone}
+            class="px-8 py-3 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-400 hover:from-emerald-500 text-white font-extrabold rounded-full shadow-[0_0_25px_rgba(16,185,129,0.5)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer border border-emerald-300 text-sm tracking-wide disabled:opacity-50 disabled:grayscale disabled:hover:scale-100 disabled:animate-none {trainWorld.isPostTripDone ? 'animate-bounce' : ''}"
+          >
+            <span>{trainWorld.isPostTripDone ? '🏁 Завершить смену и подвести итоги ➔' : '🧹 Проведите осмотр и уборку вагона...'}</span>
+          </button>
+        {:else if cabinState.alertSeatsCount > 0}
+          {@const incSeat = cabinState.seats.find((s) => s.activeIncident != null)}
+          <button
+            onclick={() => handleCallClick(incSeat?.id)}
+            class="px-6 py-2.5 bg-gradient-to-r from-rose-600 to-amber-500 text-white font-bold rounded-full shadow-[0_0_20px_rgba(244,63,94,0.6)] animate-pulse flex items-center gap-2 cursor-pointer border border-rose-300"
+          >
+            <span>🚨 Место {incSeat?.id}: требуется решение проводника ➔</span>
+          </button>
+        {:else if conductorState.shiftPhase === 'initial_round'}
+          <button
+            onclick={() => { playSuccessSound(); trainWorld.startCruisePhase(); }}
+            disabled={!trainWorld.isPreTripDone}
+            class="px-6 py-2.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 font-bold rounded-full shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:grayscale disabled:hover:scale-100"
+          >
+            <span>{trainWorld.isPreTripDone ? '🚪 Начать посадку и отправиться (14:00) ➔' : '🔍 Проведите приемку вагона перед рейсом...'}</span>
+          </button>
+        {:else if conductorState.shiftPhase === 'cruise'}
+          <button onclick={() => { playClickSound(); trainWorld.skipToNextEvent(); }} class="px-6 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-500 hover:from-cyan-500 hover:to-teal-400 text-white font-bold rounded-full shadow-[0_4px_20px_rgba(6,182,212,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer">
+            <span>⏩ Промотать до события ➔</span>
+          </button>
+        {:else if conductorState.shiftPhase === 'station_warning' || conductorState.shiftPhase === 'tver_warning'}
+          <button onclick={() => { playClickSound(); trainWorld.skipToNextEvent(); }} class="px-6 py-2.5 bg-gradient-to-r from-rose-600 to-orange-500 hover:from-rose-500 hover:to-orange-400 text-white font-bold rounded-full shadow-[0_4px_20px_rgba(225,29,72,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer">
+            <span>🚉 Перейти к прибытию ➔</span>
+          </button>
+        {:else if conductorState.shiftPhase === 'arrival'}
+          <button onclick={() => { playSuccessSound(); trainWorld.startCruisePhase(); }} class="px-6 py-2.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 font-bold rounded-full shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer">
+            <span>⏩ Отправление дальше ➔</span>
+          </button>
+        {/if}
+      </div>
+
+      <!-- Шкала маршрута -->
+      <div class="pointer-events-auto w-full bg-[#141210]/95 backdrop-blur-md border border-[#3d3831] rounded-2xl p-3 sm:p-4 shadow-2xl flex flex-col gap-2">
+        <div class="flex justify-between items-center text-[11px] font-mono text-[#a39e95] uppercase font-semibold">
+          <!-- Динамическое текущее время слева -->
+          <span class="text-[#f5f3ef] bg-[#282420] px-2 py-0.5 rounded border border-[#3d3831]">🕒 {physicsState.formattedTime}</span>
+
+          <div class="text-center flex flex-col items-center">
+            <span class="text-amber-400 text-xs">След: {physicsState.nextStation?.label || 'Санкт-Петербург Главный'}</span>
+            <span class="text-[10px] opacity-70">Прибытие: {physicsState.nextStation?.plannedTime || '16:15'}</span>
+          </div>
+
+          <span>С-Петербург (16:15)</span>
+        </div>
+        <div class="relative w-full h-1.5 bg-[#2d2924] rounded-full mt-1">
+          <div class="absolute top-0 left-0 h-full bg-amber-500 rounded-full transition-all duration-1000 ease-out" style="width: {physicsState.progressPercent}%"></div>
+          <div class="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white border-2 border-amber-500 rounded-full shadow-[0_0_10px_rgba(245,158,11,0.8)] transition-all duration-1000 ease-out" style="left: {physicsState.progressPercent}%"></div>
+        </div>
+      </div>
+    </div>
+  {:else}
+    <div class="dialogue-wrapper">
+      <ConductorDialogue />
+    </div>
+  {/if}
+
+  <!-- Модальное окно интерактивной схемы мест -->
+  <SeatMapModal isOpen={isSeatMapOpen} onClose={() => { isSeatMapOpen = false; }} />
+  <ShiftDebriefModal isOpen={isDebriefOpen} onClose={() => { isDebriefOpen = false; }} />
+
+  <!-- Модальное окно подтверждения перезапуска рейса -->
+  {#if isResetConfirmOpen}
+    <div
+      class="confirm-modal-backdrop"
+      role="presentation"
+      onclick={() => (isResetConfirmOpen = false)}
+      onkeydown={(e) => { if (e.key === 'Escape') isResetConfirmOpen = false; }}
+    >
+      <div
+        class="confirm-modal-box"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-trip-title"
+        tabindex="-1"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
+      >
+        <div id="confirm-trip-title" class="confirm-title">🔄 Начать новую поездку?</div>
+        <div class="confirm-desc">
+          Текущий рейс поезда «Белый кречет» будет перезапущен. Время вернется на 14:00 (Москва), вагон заполнится новым случайным пулом пассажиров (13–18 чел.).
+        </div>
+        <div class="confirm-actions">
+          <button class="confirm-btn-cancel" onclick={() => (isResetConfirmOpen = false)}>
+            Отмена
+          </button>
+          <button class="confirm-btn-ok" onclick={handleConfirmNewTrip}>
+            Начать заново
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Оверлей кинематографичного фазового перехода (монтажная склейка) -->
+  {#if trainWorld.isPhaseTransitioning}
+    <div
+      transition:fade={{ duration: 600 }}
+      class="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#050505] text-amber-400"
+    >
+      <div class="text-4xl mb-6">🚄</div>
+      <h2 class="text-2xl font-bold tracking-widest uppercase text-white mb-4">В пути...</h2>
+      <p class="text-xl text-[#a39e95] font-mono">
+        {trainWorld.timeSkippedText}
+      </p>
+    </div>
+  {/if}
 </div>
 
-<!-- ======================= СНИППЕТЫ SVELTE 5 ======================= -->
-
-{#snippet Header()}
-  <div class="vn-speaker-bar">
-    <div class="flex items-center gap-2 flex-wrap">
-      <span class="text-sm font-bold text-[#f5f3ef]">👤 {passengerName} • Место {currentSeat?.id || '—'}</span>
-      {#if currentSeat?.passenger?.trait}
-        <span class="text-xs px-2 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/30">Характер: {currentSeat.passenger.trait}</span>
-      {/if}
-      <!-- Индикатор режима -->
-      <span class="text-[10px] font-mono px-2 py-0.5 rounded border {isProMode ? 'bg-rose-950/60 text-rose-300 border-rose-500/50' : 'bg-emerald-950/60 text-emerald-300 border-emerald-500/50'}">
-        {isProMode ? '🔥 PRO (Голос)' : '🎓 Обучение (Кнопки)'}
-      </span>
-    </div>
-    {#if currentIncident && stage === 'decision'}
-      <span class="text-sm font-bold px-3 py-0.5 rounded border {timeLeft <= 3 ? 'bg-rose-900/30 text-rose-400 border-rose-500' : 'bg-amber-900/20 text-amber-400 border-amber-500'}">⏱️ {formattedSeconds} сек</span>
-    {/if}
-  </div>
-{/snippet}
-
-{#snippet VoiceInterface()}
-  <div class="flex flex-col items-center gap-2.5 py-2 w-full">
-    <div class="text-xs text-[#a39e95] text-center w-full">
-      {#if micError}
-        <span class="text-rose-400 font-bold">{micError}</span>
-      {:else if isRecording}
-        <div class="flex flex-col gap-2 w-full">
-          <div class="text-rose-400 font-bold animate-pulse">Идет распознавание [{formattedRecordTimer}]</div>
-          <!-- Окно живого текста -->
-          <div class="w-full min-h-[3.5rem] p-2.5 rounded-lg bg-black/50 border border-amber-500/40 text-emerald-300 text-left text-sm italic shadow-inner">
-            {finalTranscript} <span class="opacity-60">{interimTranscript}</span>
-            {#if !finalTranscript && !interimTranscript}
-              <span class="opacity-30">Слушаю вас...</span>
-            {/if}
-          </div>
-        </div>
-      {:else if isEditingVoice}
-        <!-- РЕЖИМ РЕДАКТИРОВАНИЯ ТЕКСТА ПЕРЕД ОТПРАВКОЙ -->
-        <div class="flex flex-col gap-1.5 w-full text-left" in:fade={{ duration: 150 }}>
-          <div class="flex justify-between items-center text-[11px] text-amber-400 font-bold">
-            <span>✏️ Проверьте и отредактируйте распознанную фразу:</span>
-            <span class="text-stone-400 font-normal">Enter не отправляет</span>
-          </div>
-          <textarea
-            bind:value={editableTranscript}
-            rows="2"
-            class="w-full p-2.5 rounded-lg bg-black/70 border border-amber-500/60 text-white text-sm focus:outline-none focus:border-amber-400 resize-none font-sans"
-            placeholder="Что вы сказали пассажиру..."
-          ></textarea>
-        </div>
-      {:else if isAnalyzingVoice}
-        <span class="text-amber-400 font-bold">LLM оценивает ваш ответ по регламенту...</span>
-      {:else}
-        {currentIncident ? 'Нажмите микрофон и ответьте голосом. Речь мгновенно распознается в браузере.' : 'Нажмите микрофон, чтобы заговорить с пассажиром в свободной форме.'}
-      {/if}
-    </div>
-    
-    <div class="flex gap-2 w-full justify-center mt-1">
-      {#if !isRecording && !isEditingVoice}
-        <button onclick={startRecording} disabled={isAnalyzingVoice} class="px-6 py-2.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 text-black font-bold text-sm shadow-lg disabled:opacity-50 flex gap-2">
-          {isAnalyzingVoice ? '⏳ Ожидайте...' : '🎙️ Начать ответ'}
-        </button>
-      {:else if isRecording}
-        <button onclick={() => stopRecording(false)} class="px-4 py-2.5 rounded-full bg-[#282420] text-stone-300 font-bold text-sm border border-[#3d3831] shadow-lg">
-          ✖ Отмена
-        </button>
-        <button onclick={() => stopRecording(true)} class="flex-1 max-w-[200px] px-6 py-2.5 rounded-full bg-rose-600 text-white font-bold text-sm shadow-[0_0_15px_rgba(225,29,72,0.5)] animate-pulse flex justify-center gap-2">
-          ⏹ Завершить
-        </button>
-      {:else if isEditingVoice}
-        <button onclick={() => { isEditingVoice = false; editableTranscript = ''; }} class="px-4 py-2 rounded-full bg-[#282420] text-stone-300 font-bold text-xs border border-[#3d3831] hover:bg-[#3d3831]">
-          ✖ Сбросить
-        </button>
-        <button onclick={submitEditedText} class="px-6 py-2 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-[0_0_15px_rgba(16,185,129,0.4)] flex items-center gap-1.5">
-          🚀 Отправить ИИ
-        </button>
-      {/if}
-    </div>
-  </div>
-{/snippet}
-
-{#snippet ChoicesInterface()}
-  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-    {#each dynamicOptions as opt, idx}
-      <button onclick={() => executeOption(opt)} class="text-left p-2.5 rounded-lg bg-[#201d19] border border-[#3d3831] hover:border-amber-400 hover:bg-[#2b2621] text-xs text-[#f5f3ef] transition-colors flex gap-2">
-        <span class="font-bold text-amber-500">[{idx + 1}]</span> <span>{opt.text}</span>
-      </button>
-    {/each}
-  </div>
-{/snippet}
-
-{#snippet LearningCardInterface()}
-  <div class="flex flex-col gap-2 p-1" in:fade={{ duration: 150 }}>
-    <div class="text-xs font-bold text-amber-400 border-b border-[#3d3831] pb-1">💡 Разбор (Без штрафов)</div>
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      {#if selectedOption?.why_correct}
-        <div class="bg-emerald-950/40 border border-emerald-500/30 rounded-lg p-2 text-xs text-emerald-200">
-          <span class="font-bold block mb-1">✅ Почему это верно:</span>{selectedOption.why_correct}
-        </div>
-      {/if}
-      {#if selectedOption?.what_if_wrong}
-        <div class="bg-rose-950/30 border border-rose-500/25 rounded-lg p-2 text-xs text-rose-200">
-          <span class="font-bold block mb-1">⚠️ Если ошибиться:</span>{selectedOption.what_if_wrong}
-        </div>
-      {/if}
-    </div>
-    <button class="self-end px-4 py-1.5 bg-amber-500 text-black font-bold text-xs rounded" onclick={() => { currentStepId = pendingNextStep!; pendingNextStep = null; stage = 'decision'; timeLeft = currentIncident?.steps?.[currentStepId]?.timer_seconds || 30; startTimer(); }}>Далее ➔</button>
-  </div>
-{/snippet}
-
-{#snippet FeedbackInterface()}
-  <div class="flex flex-col gap-2.5 bg-[#1a1816] border border-[#4a433a] rounded-lg p-3" in:fade={{ duration: 150 }}>
-    <div class="flex justify-between items-center border-b border-[#3d3831] pb-2">
-      <div class="flex items-center gap-2">
-        <span class="px-2 py-1 rounded text-xs font-bold {isTimeout || feedbackResult?.is_passed === false ? 'bg-rose-900/50 text-rose-400 border border-rose-500' : 'bg-emerald-900/50 text-emerald-400 border border-emerald-500'}">
-          {isTimeout ? '⏱️ Время вышло' : feedbackResult?.is_passed === false ? '❌ Ошибка' : '✅ Решено'}
-        </span>
-        <span class="text-xs font-bold text-white">{feedbackResult?.feedback_title || ''}</span>
-      </div>
-      {#if feedbackResult && feedbackResult.loyalty_delta !== undefined}
-        <div class="text-xs font-mono font-bold flex gap-2">
-          <span class="text-amber-400">Лояльность: {feedbackResult.loyalty_delta > 0 ? '+' : ''}{feedbackResult.loyalty_delta}</span>
-          <span class="text-emerald-400">Безопасность: {feedbackResult.safety_delta > 0 ? '+' : ''}{feedbackResult.safety_delta}</span>
-        </div>
-      {/if}
-    </div>
-
-    <!-- Реплика пассажира (ответ ИИ) -->
-    {#if feedbackResult?.passenger_reply}
-      <div class="bg-amber-950/40 p-2.5 rounded-lg border border-amber-500/40 text-xs text-amber-100 flex items-start gap-2 shadow-inner">
-        <span class="text-base leading-none">💬</span>
-        <div class="flex-1">
-          <strong class="text-amber-400 block mb-0.5">Ответ пассажира:</strong>
-          <span class="italic font-medium">«{feedbackResult.passenger_reply.replace(/^[«"]|[»"]$/g, '')}»</span>
-        </div>
-      </div>
-    {/if}
-
-    {#if feedbackResult?.transcription}
-      <div class="bg-black/30 p-2 rounded border border-[#3d3831] text-[11px] text-stone-400">
-        <strong class="text-stone-300">Ваши слова:</strong> {feedbackResult.transcription}
-      </div>
-    {/if}
-
-    <p class="text-xs text-[#a39e95] leading-relaxed pt-0.5">
-      <strong class="text-amber-300 block mb-0.5">Разбор инструктора:</strong>
-      {feedbackResult?.feedback || 'Анализ...'}
-    </p>
-
-    <button class="self-end px-5 py-2 mt-1 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 text-stone-950 font-bold text-xs rounded-lg shadow-md" onclick={handleComplete} disabled={!feedbackResult}>
-      {currentIncident ? 'Завершить инцидент ➔' : 'Продолжить диалог ➔'}
-    </button>
-  </div>
-{/snippet}
-
 <style>
-  .vn-dialogue-box {
-    width: 100%; z-index: 30; pointer-events: auto;
-    background: rgba(20, 18, 16, 0.95); backdrop-filter: blur(12px);
-    border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 1rem;
-    padding: 0.75rem 1.25rem; box-shadow: 0 10px 30px rgba(0,0,0,0.7);
-    display: flex; flex-direction: column; gap: 0.5rem; max-height: 48vh;
+  .cabin-viewport {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background-color: #0f0e0d;
+    padding: 0.5rem; /* Общий паддинг */
   }
-  .vn-speaker-bar { display: flex; justify-content: space-between; border-bottom: 1px solid rgba(61, 56, 49, 0.5); padding-bottom: 0.4rem; }
-  .vn-speech-area { background: rgba(26, 24, 22, 0.45); border: 1px solid rgba(61, 56, 49, 0.35); border-radius: 0.5rem; padding: 0.5rem; min-height: 2.5rem; }
-  .speech-quote { font-style: italic; color: #f5f3ef; font-size: 0.875rem; margin: 0; }
-  .action-btn { padding: 0.45rem 0.85rem; border-radius: 0.5rem; font-size: 0.8125rem; font-weight: 600; background: #201d19; border: 1px solid #3d3831; cursor: pointer; transition: 0.2s; }
-  .action-btn:hover { background: #2b2621; border-color: #f59e0b; }
+
+  @media (min-width: 768px) {
+    .cabin-viewport {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: center;
+      padding: 0.5rem;
+    }
+  }
+
+  /* HUD Top Bar */
+  .hud-top-bar {
+    position: absolute;
+    top: 1rem;
+    left: 1rem;
+    right: 1rem;
+    z-index: 35;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+
+  .hud-top-bar > * {
+    pointer-events: auto;
+  }
+
+  @media (min-width: 768px) {
+    .hud-top-bar {
+      top: 1.25rem;
+      left: 1.5rem;
+      right: 1.5rem;
+      max-width: 96vw;
+      margin: 0 auto;
+    }
+  }
+
+  /* Scroll Area for 2.5D Scene */
+  .scene-scroll-area {
+    flex: 1 1 0%;
+    min-height: 0;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  @media (min-width: 768px) {
+    .scene-scroll-area {
+      flex: none;
+      width: auto;
+      height: auto;
+      overflow: visible;
+      justify-content: center;
+    }
+  }
+
+  /* Hide scrollbars */
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Scene Container */
+  .scene-container {
+    position: relative;
+    display: inline-block;
+    max-width: 96vw;
+    max-height: 84vh;
+    border-radius: 1rem;
+    overflow: hidden;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+    background-color: #000;
+  }
+
+  .base-image {
+    display: block;
+    max-height: 84vh;
+    max-width: 96vw;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    user-select: none;
+  }
+
+  .passenger-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  @media (max-width: 767px) {
+    .scene-container {
+      height: 100%;
+      border-radius: 0.75rem;
+      max-width: none;
+      max-height: none;
+      flex-shrink: 0;
+      box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.8);
+    }
+
+    .scene-container.aisle-scene {
+      width: 140vw;
+    }
+
+    .scene-container.seat-scene {
+      width: 180vw;
+      transition: width 0.5s ease-in-out;
+    }
+
+    .base-image {
+      width: 100%;
+      height: 100%;
+      max-width: none;
+      max-height: none;
+      object-fit: cover;
+      object-position: center;
+    }
+
+    .passenger-overlay {
+      width: 100%;
+      height: 100%;
+      max-width: none;
+      max-height: none;
+      object-fit: cover;
+      object-position: center;
+    }
+
+    .ambient-sway {
+      animation: swayPan 14s ease-in-out infinite alternate;
+      will-change: transform;
+    }
+
+    .scene-scroll-area:active .ambient-sway {
+      animation-play-state: paused;
+    }
+
+    @keyframes swayPan {
+      0% {
+        transform: translateX(-1.2%);
+      }
+      100% {
+        transform: translateX(1.2%);
+      }
+    }
+  }
+
+  /* Bottom UI Panel (Aisle view) */
+  .bottom-ui-panel {
+    position: absolute;
+    bottom: 1.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 91.666667%;
+    max-width: 48rem;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    pointer-events: none;
+  }
+
+  @media (max-width: 767px) {
+    .bottom-ui-panel {
+      position: relative;
+      bottom: auto;
+      left: auto;
+      transform: none;
+      width: 100%;
+      max-width: none;
+      flex-shrink: 0;
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem 1rem;
+      background: #0f0e0d;
+      border: 1px solid #262320;
+      border-radius: 1rem;
+      margin-top: 0.5rem;
+      pointer-events: auto;
+    }
+  }
+
+  /* Dialogue Wrapper (Seat view) */
+  .dialogue-wrapper {
+    position: absolute;
+    bottom: 1.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 91.666667%;
+    max-width: 54rem;
+    z-index: 30;
+    pointer-events: none;
+  }
+
+  @media (max-width: 767px) {
+    .dialogue-wrapper {
+      position: relative;
+      bottom: auto;
+      left: auto;
+      transform: none;
+      width: 100%;
+      max-width: none;
+      flex-shrink: 0;
+      z-index: 30;
+      pointer-events: auto;
+      background: #0f0e0d;
+      border: 1px solid #262320;
+      border-radius: 1rem;
+      margin-top: 0.5rem;
+      max-height: 48vh;
+      overflow-y: auto;
+    }
+  }
+
+
+
+  .aisle-call-badge {
+    position: absolute;
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.875rem;
+    border-radius: 0.75rem;
+    background: linear-gradient(135deg, rgba(244, 63, 94, 0.95), rgba(225, 29, 72, 0.95));
+    border: 2px solid rgba(254, 205, 211, 0.9);
+    color: #ffffff;
+    font-size: 0.8125rem;
+    box-shadow: 0 10px 25px -3px rgba(225, 29, 72, 0.6), 0 0 15px rgba(244, 63, 94, 0.5);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: filter 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .aisle-call-badge:hover {
+    filter: brightness(1.15);
+    box-shadow: 0 12px 30px -3px rgba(225, 29, 72, 0.8), 0 0 25px rgba(244, 63, 94, 0.75);
+  }
+
+  .call-ping {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    width: 12px;
+    height: 12px;
+    border-radius: 9999px;
+    background-color: #f43f5e;
+    animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  @keyframes ping {
+    75%, 100% {
+      transform: scale(2);
+      opacity: 0;
+    }
+  }
+
+  /* Баннер фазы смены проводника над проходом */
+  .aisle-phase-banner {
+    position: relative;
+    z-index: 25;
+  }
+
+  .phase-banner-content {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.35rem 0.8rem;
+    border-radius: 0.625rem;
+    background: rgba(20, 18, 16, 0.92);
+    backdrop-filter: blur(10px);
+    border: 1px solid #3d3831;
+    color: #f5f3ef;
+    font-size: 0.75rem;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6);
+  }
+
+  .phase-round {
+    border-color: rgba(245, 158, 11, 0.4);
+  }
+
+  .phase-cruise {
+    border-color: rgba(59, 130, 246, 0.4);
+    background: rgba(15, 23, 42, 0.92);
+  }
+
+  .phase-warning {
+    border-color: rgba(245, 158, 11, 0.8);
+    background: rgba(45, 30, 15, 0.95);
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.3);
+  }
+
+  .phase-arrival {
+    border-color: rgba(16, 185, 129, 0.5);
+    background: rgba(10, 30, 20, 0.92);
+  }
+
+  .phase-pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #3b82f6;
+    box-shadow: 0 0 8px #3b82f6;
+    animation: pulse 1.5s infinite;
+  }
+
+  /* Блок кнопок в правом верхнем углу */
+  .top-actions-cluster {
+    position: relative;
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  @media (max-width: 640px) {
+    .phase-banner-content {
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.5rem;
+      gap: 0.4rem;
+    }
+    .seat-map-trigger-btn {
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.5rem;
+    }
+  }
+
+  /* Кнопка открытия схемы вагона */
+  .seat-map-trigger-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.85rem;
+    border-radius: 0.625rem;
+    background: rgba(26, 24, 22, 0.9);
+    backdrop-filter: blur(10px);
+    border: 1px solid #3d3831;
+    color: #f5f3ef;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6);
+    transition: all 0.15s ease;
+  }
+
+  .seat-map-trigger-btn:hover {
+    background: rgba(40, 36, 32, 0.95);
+    border-color: #f59e0b;
+    color: #f59e0b;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.7), 0 0 12px rgba(245, 158, 11, 0.2);
+  }
+
+  .trigger-icon {
+    font-size: 0.875rem;
+  }
+
+  .trigger-alert-badge {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.1rem 0.4rem;
+    border-radius: 9999px;
+    background: #e11d48;
+    color: #ffffff;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .trigger-alert-ping {
+    position: absolute;
+    inset: -2px;
+    border-radius: 9999px;
+    background: #f43f5e;
+    opacity: 0.75;
+    animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+
+
+  /* Плавающий системный тост событий станции */
+  .station-toast-overlay {
+    position: absolute;
+    top: 1.25rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    pointer-events: none;
+    max-width: 90vw;
+  }
+
+  .toast-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.6rem 1.25rem;
+    border-radius: 0.75rem;
+    background: rgba(20, 18, 16, 0.95);
+    backdrop-filter: blur(14px);
+    border: 1px solid rgba(245, 158, 11, 0.6);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), 0 0 18px rgba(245, 158, 11, 0.25);
+    text-align: center;
+    color: #f5f3ef;
+  }
+
+  .toast-title {
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #f59e0b;
+    letter-spacing: 0.02em;
+  }
+
+  .toast-subtitle {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #d6d3cd;
+    line-height: 1.3;
+  }
+
+  /* Модальное окно подтверждения */
+  .confirm-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+
+  .confirm-modal-box {
+    width: 100%;
+    max-width: 440px;
+    background: #1a1816;
+    border: 1px solid #4a433a;
+    border-radius: 1rem;
+    padding: 1.5rem;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8), 0 0 25px rgba(245, 158, 11, 0.15);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    color: #f5f3ef;
+  }
+
+  .confirm-title {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: #f59e0b;
+  }
+
+  .confirm-desc {
+    font-size: 0.875rem;
+    color: #a8a29e;
+    line-height: 1.5;
+  }
+
+  .confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+  }
+
+  .confirm-btn-cancel {
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    background: #282420;
+    border: 1px solid #4a433a;
+    color: #d6d3cd;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .confirm-btn-cancel:hover {
+    background: #342f2a;
+    color: #ffffff;
+  }
+
+  .confirm-btn-ok {
+    padding: 0.5rem 1.1rem;
+    border-radius: 0.5rem;
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    border: 1px solid #fbbf24;
+    color: #0f0e0d;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(245, 158, 11, 0.3);
+    transition: all 0.15s ease;
+  }
+
+  .confirm-btn-ok:hover {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 15px rgba(245, 158, 11, 0.45);
+  }
+
+  .seat-top-bar {
+    position: relative;
+    width: 100%;
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .seat-top-bar > * {
+    pointer-events: auto;
+  }
+
+  .seat-stepper-mini {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: rgba(20, 18, 16, 0.92);
+    backdrop-filter: blur(10px);
+    border: 1px solid #3d3831;
+    padding: 0.25rem 0.4rem;
+    border-radius: 0.625rem;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6);
+  }
+
+  .stepper-mini-btn {
+    padding: 0.3rem 0.65rem;
+    border-radius: 0.375rem;
+    background: #23201c;
+    border: 1px solid #3d3831;
+    color: #d6d3d1;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .stepper-mini-btn:hover {
+    border-color: #f59e0b;
+    color: #f59e0b;
+    background: #2d2822;
+  }
+
+  .stepper-mini-seat {
+    padding: 0.3rem 0.65rem;
+    border-radius: 0.375rem;
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    color: #fbbf24;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .stepper-mini-seat:hover {
+    background: rgba(245, 158, 11, 0.25);
+    border-color: #f59e0b;
+  }
+
+  /* Контейнеры левой и правой половины вагона */
+  .window-viewport {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 50%;
+    z-index: 1;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .left-viewport {
+    left: 0;
+  }
+
+  /* Правую половину зеркалим, чтобы движение шло вправо и не двоился рисунок */
+  .right-viewport {
+    right: 0;
+    transform: scaleX(-1);
+  }
+
+  /* Базовый класс полотна: по умолчанию на паузе (для стоянок) */
+  .parallax-layer {
+    position: absolute;
+    inset: 0;
+    background-repeat: repeat-x;
+    animation: flowLeft linear infinite;
+    animation-play-state: paused; /* Стоит на месте */
+  }
+
+  /* Включается в движение только когда поезд едет */
+  .parallax-layer.is-moving {
+    animation-play-state: running;
+  }
+
+  /* 1. СЛОЙ НЕБА: неторопливый цикл 20 секунд */
+  .sky-layer {
+    z-index: 1;
+    background-image: url('/assets/bg_sky.jpg');
+    background-size: auto 100%;
+    background-position: 0 0;
+    animation-duration: 30s; /* Фиксированное плавное скольжение */
+  }
+
+  /* 2. СЛОЙ ЗЕМЛИ: комфортный цикл 10 секунд */
+  .ground-layer {
+    z-index: 2;
+    top: 35%; /* Опущено на 5% ниже */
+    background-image: url('/assets/bg_bottom.png');
+    background-size: auto 100%;
+    background-position: 0 bottom;
+    animation-duration: 15s; /* Фиксированный спокойный ход без ряби */
+  }
+
+  /* Бесконечный сдвиг полотна */
+  @keyframes flowLeft {
+    from {
+      background-position-x: 0;
+    }
+    to {
+      background-position-x: -2000px;
+    }
+  }
+
+  /* Прозрачный салон поверх пейзажа */
+  .cabin-overlay {
+    position: relative;
+    z-index: 2; /* Поверх пейзажа, но под табло (у табло z-index: 15) */
+  }
+
+  /* Легкая микро-вибрация салона на сверхскорости */
+  .high-speed-shake {
+    animation: cabinShake 0.15s infinite ease-in-out alternate;
+  }
+
+  @keyframes cabinShake {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(0.75px); }
+  }
+
+  /* Слой перрона/платформы */
+  .station-platform-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 1; /* Поверх бегущего леса, но под салоном */
+    background-image: url('/assets/platform_station.jpg');
+    background-size: cover;
+    background-position: center;
+    opacity: 0;
+    transition: opacity 1.5s ease-in-out; /* Плавное перетекание за 1.5 сек */
+    pointer-events: none;
+  }
+
+  .station-platform-layer.platform-visible {
+    opacity: 1;
+  }
+
+  /* Стили для мини-игр обхода вагона */
+  .interactive-hotspot {
+    position: absolute;
+    z-index: 25;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    background: rgba(20, 18, 16, 0.8);
+    border: 2px solid #f59e0b;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 15px rgba(245, 158, 11, 0.5);
+    transition: all 0.2s ease;
+  }
+
+  .interactive-hotspot:hover {
+    transform: scale(1.15) !important;
+    background: #f59e0b;
+  }
+
+  .hotspot-ping {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid #f59e0b;
+    animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
 </style>
