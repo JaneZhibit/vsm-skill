@@ -14,7 +14,7 @@
     { route: 'trips' as AppRoute, label: 'Учебные рейсы', icon: '🚄' },
     { route: 'dashboard' as AppRoute, label: 'Мой профиль', icon: '👤' },
     { route: 'leaderboard' as AppRoute, label: 'Рейтинг', icon: '🏆' },
-    { route: 'studio' as AppRoute, label: 'База знаний', icon: '📚' },
+    { route: 'studio' as AppRoute, label: 'Конструктор инцидентов', icon: '🛠️' },
   ];
 
   function handleNav(target: AppRoute) {
@@ -33,7 +33,7 @@
 
 <div class="h-screen w-screen overflow-hidden bg-[#0f0e0d] text-[#f5f3ef] flex flex-col md:flex-row select-none">
   <!-- DESKTOP SIDEBAR -->
-  <aside class="hidden md:flex flex-col justify-between w-60 h-full bg-[#141210] border-r border-[#262320] p-4 shrink-0 z-40">
+  <aside class="hidden md:flex flex-col justify-between w-64 h-full bg-[#141210] border-r border-[#262320] p-4 shrink-0 z-40">
     <div class="flex flex-col gap-6">
       <!-- Логотип -->
       <div class="flex items-center gap-3 px-1 pt-1">
@@ -68,7 +68,7 @@
               : 'text-[#a39e95] hover:text-white hover:bg-[#1a1816] border border-transparent'}"
           >
             <span class="text-base">{item.icon}</span>
-            <span>{item.label}</span>
+            <span class="truncate">{item.label}</span>
           </button>
         {/each}
       </nav>
@@ -87,22 +87,22 @@
   </aside>
 
   <!-- КОНТЕНТНАЯ ОБЛАСТЬ -->
-  <main class="flex-1 h-full w-full overflow-y-auto pb-16 md:pb-0 relative flex flex-col">
+  <main class="flex-1 h-full w-full overflow-y-auto relative flex flex-col">
     {@render children()}
   </main>
 
   <!-- MOBILE BOTTOM NAV -->
-  <nav class="md:hidden fixed bottom-0 left-0 right-0 h-14 bg-[#141210] border-t border-[#262320] grid grid-cols-4 items-center z-50">
+  <nav class="md:hidden fixed bottom-0 left-0 right-0 min-h-[3.75rem] pb-[max(0.35rem,env(safe-area-inset-bottom))] bg-[#141210]/95 backdrop-blur-lg border-t border-[#262320] grid grid-cols-4 items-center z-50 px-1 shadow-[0_-8px_20px_rgba(0,0,0,0.5)]">
     {#each navItems as item}
       {@const isActive = authStore.currentRoute === item.route}
       <button
         onclick={() => handleNav(item.route)}
-        class="flex flex-col items-center justify-center gap-0.5 h-full cursor-pointer {isActive
+        class="flex flex-col items-center justify-center gap-0.5 h-full py-1.5 cursor-pointer {isActive
           ? 'text-amber-400 font-semibold'
           : 'text-[#706b63]'}"
       >
         <span class="text-base leading-none">{item.icon}</span>
-        <span class="text-[10px]">{item.label}</span>
+        <span class="text-[9px] leading-tight text-center line-clamp-2 max-w-full px-1">{item.label}</span>
       </button>
     {/each}
   </nav>

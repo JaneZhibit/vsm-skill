@@ -68,7 +68,7 @@
   });
 </script>
 
-<div class="h-full w-full overflow-y-auto bg-[#0f0e0d] text-[#f5f3ef] flex flex-col">
+<div class="w-full bg-[#0f0e0d] text-[#f5f3ef] flex flex-col pb-28 md:pb-8">
   <div class="max-w-4xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-6 flex-1">
 
     <header class="bg-[#1a1816] border border-[#2d2924] rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-5">
