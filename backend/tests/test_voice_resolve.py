@@ -41,5 +41,36 @@ class TestVoiceExamAndPolza(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(opt_1.get("what_if_wrong", "")) > 0)
 
 
+    async def test_gemini_tts_model_and_voices(self):
+        """Проверка отправки параметров Gemini TTS (модель google/gemini-3.8-flash-tts и голоса Puck, Leda, Sulafat)."""
+        captured_payloads = []
+
+        class MockResponse:
+            status_code = 200
+            def json(self):
+                return {"audio": "FAKE_BASE64_AUDIO"}
+
+        async def mock_post(url, headers=None, json=None):
+            captured_payloads.append(json)
+            return MockResponse()
+
+        with patch("httpx.AsyncClient.post", side_effect=mock_post):
+            # 1. male_young -> Puck
+            res_male = await polza_ai.generate_speech_base64("Тест мужской", archetype="male_young")
+            self.assertEqual(res_male, "FAKE_BASE64_AUDIO")
+            self.assertEqual(captured_payloads[-1]["model"], "google/gemini-3.8-flash-tts")
+            self.assertEqual(captured_payloads[-1]["voice"], "Puck")
+
+            # 2. female_young -> Leda
+            res_female = await polza_ai.generate_speech_base64("Тест женский", archetype="female_young")
+            self.assertEqual(res_female, "FAKE_BASE64_AUDIO")
+            self.assertEqual(captured_payloads[-1]["voice"], "Leda")
+
+            # 3. female_elderly -> Sulafat
+            res_elderly = await polza_ai.generate_speech_base64("Тест бабушка", archetype="female_elderly")
+            self.assertEqual(res_elderly, "FAKE_BASE64_AUDIO")
+            self.assertEqual(captured_payloads[-1]["voice"], "Sulafat")
+
+
 if __name__ == "__main__":
     unittest.main()

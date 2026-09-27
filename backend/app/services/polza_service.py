@@ -53,41 +53,37 @@ class PolzaAIService:
         trait: str = "polite",
         voice: Optional[str] = None
     ) -> Optional[str]:
-        """Синтез речи (TTS) с динамическим подбором голоса и скорости."""
+        """Синтез речи (TTS) через Google Gemini 3.8 Flash TTS."""
         if not self.api_key or self.api_key == "your_polza_api_key_here":
             return None
 
-        # Подбор голоса по архетипу (OpenAI TTS)
+        # Подбор голоса по архетипу (Google Gemini 3.8 Flash TTS)
         voice_map = {
-            "male_young": "onyx",         # Мужской, глубокий
-            "female_young": "nova",       # Женский, энергичный
-            "female_elderly": "shimmer",  # Женский, мягкий
-            "any": "alloy"
+            "male_young": "Puck",         # Оптимистичный, живой (Молодой парень)
+            "female_young": "Leda",       # Юный, молодёжный (Девушка)
+            "female_elderly": "Sulafat",  # Тёплый, уютный (Бабушка)
+            "any": "Puck"
         }
-        selected_voice = voice or voice_map.get(archetype, "alloy")
-
-        # Настройка скорости по характеру
-        speed = 1.0
-        if trait == "demanding":
-            speed = 1.15  # Говорит быстро и напористо
-        elif trait == "anxious":
-            speed = 1.05  # Немного нервно
-        elif trait == "polite":
-            speed = 0.95  # Размеренно и спокойно
+        selected_voice = voice or voice_map.get(archetype, "Puck")
 
         payload = {
-            "model": "openai/tts-1",  # Надежная быстрая модель
+            "model": settings.POLZA_TTS_MODEL,  # "google/gemini-3.8-flash-tts"
             "input": text,
             "voice": selected_voice,
-            "speed": speed,
             "response_format": "mp3"
         }
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=20.0) as client:
                 resp = await client.post(f"{self.base_url}/audio/speech", headers=self._headers(), json=payload)
                 if resp.status_code == 200:
                     return resp.json().get("audio")
+                else:
+                    # Фоллбэк на резервную модель Gemini
+                    payload["model"] = settings.POLZA_TTS_FALLBACK_MODEL
+                    resp_fb = await client.post(f"{self.base_url}/audio/speech", headers=self._headers(), json=payload)
+                    if resp_fb.status_code == 200:
+                        return resp_fb.json().get("audio")
         except Exception as e:
             print(f"[POLZA-TTS] Ошибка генерации голоса: {e}")
         return None
