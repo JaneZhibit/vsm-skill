@@ -6,23 +6,26 @@
 
   // --- ДАННЫЕ РЕДАКТОРА ---
   let customTitle = $state<string>('');
-  let targetArchetype = $state<string>('male_young');
+  let targetArchetype = $state<string>('any');
   
   // Триггеры
   let triggerType = $state<'orchestrator' | 'chained' | 'test'>('orchestrator');
   let triggerParentId = $state<string>('');
   let triggerDelay = $state<number>(15);
+  let triggerCondition = $state<'ignored' | 'resolved'>('ignored'); // ФАЗА СРАБАТЫВАНИЯ
 
   // Визуал и Аудио
   let isPassive = $state<boolean>(false);
   let ambientAudio = $state<string>('');
   let previewAudioObj = $state<HTMLAudioElement | null>(null);
+  let isUploadingAudio = $state<boolean>(false);
 
   // Компетенции
   let skills = $state<Record<string, boolean>>({ safety: false, service: true, medicine: false, discipline: false });
 
-  // ИИ (LLM)
+  // ИИ (LLM) и Эмоции
   let allowedMoods = $state<string[]>(['neutral']);
+  let activePreviewMood = $state<string>('neutral'); // Что сейчас показываем крупно
   let llmSystemPrompt = $state<string>('');
   let expectedRule = $state<string>('');
 
@@ -34,17 +37,16 @@
 
   // Словари для UI
   const ALL_MOODS = ['neutral', 'angry', 'happy', 'sleeping', 'sick', 'drunk', 'vaping_calm', 'vaping_angry', 'crying'];
-  const AUDIO_FILES = [
+  let AUDIO_FILES = $state([
     { id: '', label: '🔇 Без звука' },
     { id: 'crying_child.mp3', label: '😭 Плач ребенка' },
     { id: 'vape_hiss.mp3', label: '💨 Шипение вейпа' },
     { id: 'kid_playing.mp3', label: '📱 Звуки мобильной игры' },
-  ];
+  ]);
 
   // --- РЕАКТИВНЫЙ ПРЕВЬЮ ПАССАЖИРА ---
-  let previewMood = $derived(allowedMoods.length > 0 ? allowedMoods[0] : 'neutral');
   let previewArchetype = $derived(targetArchetype === 'any' ? 'male_young' : targetArchetype);
-  let previewImageUrl = $derived(`/assets/passengers/${previewArchetype}/${previewMood}.png`);
+  let previewImageUrl = $derived(`/assets/passengers/${previewArchetype}/${activePreviewMood}.png`);
 
   onMount(async () => {
     // Загружаем список существующих событий для "Цепной реакции"
@@ -56,14 +58,35 @@
     } catch {}
   });
 
-  function toggleMood(mood: string) {
-    playClickSound();
-    if (allowedMoods.includes(mood)) {
-      if (allowedMoods.length > 1) {
-        allowedMoods = allowedMoods.filter(m => m !== mood);
+  // Загрузка своего аудио
+  async function handleAudioUpload(e: Event) {
+    const input = e.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+    
+    const file = input.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+
+    isUploadingAudio = true;
+    try {
+      const res = await fetch('/api/v1/simulation/upload-ambient-audio', {
+        method: 'POST',
+        body: formData
+      });
+      if (res.ok) {
+        const data = await res.json();
+        AUDIO_FILES = [...AUDIO_FILES, { id: data.filename, label: `🎵 ${data.filename}` }];
+        ambientAudio = data.filename;
+        playSuccessSound();
+      } else {
+        throw new Error();
       }
-    } else {
-      allowedMoods = [...allowedMoods, mood];
+    } catch {
+      playErrorSound();
+      alert("Ошибка загрузки аудио");
+    } finally {
+      isUploadingAudio = false;
+      input.value = '';
     }
   }
 
@@ -77,6 +100,17 @@
       previewAudioObj.volume = 0.5;
       previewAudioObj.loop = true;
       previewAudioObj.play().catch(() => {});
+    }
+  }
+
+  function toggleMoodSelection(mood: string) {
+    playClickSound();
+    if (allowedMoods.includes(mood)) {
+      if (allowedMoods.length > 1) {
+        allowedMoods = allowedMoods.filter(m => m !== mood);
+      }
+    } else {
+      allowedMoods = [...allowedMoods, mood];
     }
   }
 
@@ -95,7 +129,8 @@
       trigger: {
         type: triggerType,
         parent_id: triggerType === 'chained' ? triggerParentId : null,
-        delay_sec: Number(triggerDelay)
+        delay_sec: Number(triggerDelay),
+        condition: triggerCondition
       },
       allowed_moods: allowedMoods,
       ambient_audio: ambientAudio || null,
@@ -118,7 +153,6 @@
           ? 'Тестовое событие готово! Запустите PRO-Рейс, оно сработает по таймеру.'
           : 'Событие добавлено в пул GameMaster!';
         
-        // Обновляем список родителей
         const json = await res.json();
         existingScenarios = [...existingScenarios, { id: json.incident_id || payload.incident_id, title: payload.title }];
       } else {
@@ -157,12 +191,12 @@
       <div class="p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/50 text-rose-300 text-sm font-bold flex items-center gap-2.5">❌ {errorMessage}</div>
     {/if}
 
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start mt-2">
       
-      <!-- ЛЕВАЯ КОЛОНКА: Идентификация и Визуал (Превью) -->
+      <!-- 1. АКТЕР И ВИЗУАЛ (Галерея) -->
       <div class="lg:col-span-4 space-y-4">
         <div class="p-5 rounded-2xl bg-[#141210] border border-[#2d2924] shadow-lg flex flex-col gap-4">
-          <h3 class="text-xs font-bold text-amber-400 uppercase tracking-wider border-b border-[#2d2924] pb-2">1. Актер и Визуал</h3>
+          <h3 class="text-xs font-bold text-amber-400 uppercase tracking-wider border-b border-[#2d2924] pb-2">1. Актер и Визуализация</h3>
           
           <div class="space-y-1.5">
             <label for="custom-title-input" class="text-[11px] text-[#a39e95]">Название события</label>
@@ -172,133 +206,169 @@
           <div class="space-y-1.5">
             <label for="target-archetype-select" class="text-[11px] text-[#a39e95]">Архетип (Кто это?)</label>
             <select id="target-archetype-select" bind:value={targetArchetype} class="w-full px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-white outline-none">
-              <option value="any">🎲 Любой случайный</option>
+              <option value="any">🎲 Любой случайный (Auto)</option>
               <option value="male_young">👨 Молодой парень</option>
               <option value="female_young">👩 Девушка</option>
               <option value="female_elderly">👵 Пожилая женщина</option>
             </select>
           </div>
 
-          <!-- Окно Превью Спрайта -->
-          <div class="w-full aspect-square bg-[#0a0908] rounded-xl border border-[#2d2924] relative overflow-hidden flex items-center justify-center shadow-inner">
-            <div class="absolute top-2 left-2 px-2 py-0.5 bg-black/60 rounded text-[9px] text-[#706b63] border border-[#2d2924] z-10 backdrop-blur-md">Превью ({previewMood})</div>
-            
+          <!-- Главное превью -->
+          <div class="w-full aspect-[4/3] bg-[#0a0908] rounded-xl border border-[#2d2924] relative overflow-hidden flex items-center justify-center shadow-inner">
+            <div class="absolute top-2 left-2 px-2 py-0.5 bg-black/60 rounded text-[9px] text-[#706b63] border border-[#2d2924] z-10 backdrop-blur-md">
+              Превью ({activePreviewMood})
+            </div>
             <img 
               src={previewImageUrl} 
               alt="Превью" 
-              class="w-[85%] h-[85%] object-contain opacity-90 transition-all duration-300"
-              onerror={(e) => { const img = e.currentTarget as HTMLImageElement; img.src = `/assets/passengers/${previewArchetype}/neutral.png`; }}
+              class="h-[85%] object-contain opacity-90 transition-all duration-300" 
+              onerror={(e) => { const img = e.currentTarget as HTMLImageElement; img.src = `/assets/passengers/${previewArchetype}/neutral.png`; }} 
             />
           </div>
 
-          <div class="space-y-2">
-            <label for="mood-chips" class="text-[11px] text-[#a39e95]">Доступные эмоции (ИИ выберет из них)</label>
-            <div id="mood-chips" class="flex flex-wrap gap-1.5">
+          <!-- Галерея эмоций -->
+          <div>
+            <div class="text-[11px] text-[#a39e95] mb-2 block">Доступные эмоции для ИИ (Выберите нужные):</div>
+            <div class="grid grid-cols-4 gap-2">
               {#each ALL_MOODS as mood}
-                <button 
-                  type="button"
-                  onclick={() => toggleMood(mood)}
-                  class="px-2 py-1 rounded text-[10px] font-mono border transition-all cursor-pointer {allowedMoods.includes(mood) ? 'bg-amber-500/20 border-amber-500 text-amber-300' : 'bg-[#0f0e0d] border-[#2d2924] text-[#706b63] hover:border-[#706b63]'}"
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div 
+                  class="relative aspect-square bg-[#0f0e0d] rounded-lg border-2 cursor-pointer transition-all overflow-hidden group {allowedMoods.includes(mood) ? 'border-amber-500' : 'border-transparent hover:border-[#3d3831]'}"
+                  onclick={() => { activePreviewMood = mood; }}
                 >
-                  {mood}
-                </button>
+                  <!-- Маленькая превьюшка -->
+                  <img 
+                    src={`/assets/passengers/${previewArchetype}/${mood}.png`} 
+                    class="w-full h-full object-cover opacity-80 group-hover:opacity-100" 
+                    onerror={(e) => { const img = e.currentTarget as HTMLImageElement; img.src = `/assets/passengers/${previewArchetype}/neutral.png`; }} 
+                    alt={mood}
+                  />
+                  
+                  <!-- Чекбокс включения в пул -->
+                  <div class="absolute bottom-1 right-1 bg-black/80 rounded border border-[#3d3831] p-0.5 z-10">
+                    <input 
+                      type="checkbox" 
+                      checked={allowedMoods.includes(mood)} 
+                      onchange={() => toggleMoodSelection(mood)} 
+                      class="w-3 h-3 accent-amber-500 cursor-pointer" 
+                      title="Включить в список ИИ" 
+                    />
+                  </div>
+                  <!-- Лейбл (показывается при наведении) -->
+                  <div class="absolute top-0 left-0 w-full bg-black/70 text-[8px] text-center text-white py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {mood}
+                  </div>
+                </div>
               {/each}
             </div>
           </div>
         </div>
       </div>
 
-      <!-- СРЕДНЯЯ КОЛОНКА: Триггеры и Аудио -->
+      <!-- 2. ТРИГГЕРЫ И ОКРУЖЕНИЕ -->
       <div class="lg:col-span-4 space-y-4">
         <div class="p-5 rounded-2xl bg-[#141210] border border-[#2d2924] shadow-lg flex flex-col gap-5">
-          <h3 class="text-xs font-bold text-emerald-400 uppercase tracking-wider border-b border-[#2d2924] pb-2">2. Триггер и Окружение</h3>
+          <h3 class="text-xs font-bold text-emerald-400 uppercase tracking-wider border-b border-[#2d2924] pb-2">2. Логика срабатывания и Окружение</h3>
           
           <div class="space-y-3">
-            <label for="activation-condition" class="text-[11px] text-[#a39e95]">Условие активации</label>
-            
-            <label class="flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all {triggerType === 'orchestrator' ? 'bg-emerald-950/20 border-emerald-500/50' : 'bg-[#0f0e0d] border-[#2d2924]'}">
+            <label class="flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all {triggerType === 'orchestrator' ? 'bg-emerald-950/20 border-emerald-500/50' : 'bg-[#0f0e0d] border-[#2d2924]'}">
               <input type="radio" bind:group={triggerType} value="orchestrator" class="mt-0.5 accent-emerald-500" />
               <div>
                 <div class="text-xs font-bold text-white">🧠 Решает Оркестратор</div>
-                <div class="text-[10px] text-[#706b63] leading-tight">Событие попадет в пул. GameMaster запустит его, если у игрока проседают выбранные компетенции.</div>
+                <div class="text-[10px] text-[#706b63] leading-tight mt-0.5">GameMaster сам решит, когда запустить по ходу рейса.</div>
               </div>
             </label>
 
-            <label class="flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all {triggerType === 'chained' ? 'bg-indigo-950/20 border-indigo-500/50' : 'bg-[#0f0e0d] border-[#2d2924]'}">
+            <label class="flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all {triggerType === 'chained' ? 'bg-indigo-950/20 border-indigo-500/50' : 'bg-[#0f0e0d] border-[#2d2924]'}">
               <input type="radio" bind:group={triggerType} value="chained" class="mt-0.5 accent-indigo-500" />
               <div class="w-full">
-                <div class="text-xs font-bold text-white">🔗 Цепная реакция</div>
-                <div class="text-[10px] text-[#706b63] leading-tight mb-2">Запустится как следствие другого события.</div>
+                <div class="text-xs font-bold text-indigo-300 mb-1">🔗 Цепная реакция (Следствие)</div>
                 {#if triggerType === 'chained'}
-                  <div class="flex flex-col gap-2 mt-2">
-                    <select bind:value={triggerParentId} class="w-full px-2 py-1.5 rounded bg-black border border-indigo-500/30 text-[11px] text-white outline-none">
-                      <option value="" disabled>-- Выберите родительское событие --</option>
+                  <div class="space-y-2 mt-2">
+                    <select bind:value={triggerParentId} class="w-full px-2 py-1.5 rounded bg-black border border-indigo-500/30 text-xs text-white outline-none">
+                      <option value="" disabled>-- Родительское событие --</option>
                       {#each existingScenarios as sc}
                         <option value={sc.id}>{sc.title}</option>
                       {/each}
                     </select>
-                    <div class="flex items-center gap-2">
-                      <span class="text-[10px] text-indigo-300">Через</span>
-                      <input bind:value={triggerDelay} type="number" class="w-16 px-2 py-1 rounded bg-black border border-indigo-500/30 text-xs font-mono text-white text-center outline-none" />
-                      <span class="text-[10px] text-indigo-300">секунд</span>
+                    
+                    <select bind:value={triggerCondition} class="w-full px-2 py-1.5 rounded bg-black border border-indigo-500/30 text-xs text-white outline-none">
+                      <option value="ignored">❌ Если родитель ИГНОРИРОВАЛСЯ</option>
+                      <option value="resolved">✅ Если родитель был РЕШЕН</option>
+                    </select>
+
+                    <div class="flex items-center justify-between text-xs text-indigo-300">
+                      <span>Спустя:</span>
+                      <div class="flex items-center gap-1">
+                        <input bind:value={triggerDelay} type="number" class="w-16 px-2 py-1 rounded bg-black border border-indigo-500/30 font-mono text-white text-center outline-none text-xs" />
+                        <span>сек</span>
+                      </div>
                     </div>
                   </div>
                 {/if}
               </div>
             </label>
 
-            <label class="flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all {triggerType === 'test' ? 'bg-rose-950/20 border-rose-500/50' : 'bg-[#0f0e0d] border-[#2d2924]'}">
+            <label class="flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all {triggerType === 'test' ? 'bg-rose-950/20 border-rose-500/50' : 'bg-[#0f0e0d] border-[#2d2924]'}">
               <input type="radio" bind:group={triggerType} value="test" class="mt-0.5 accent-rose-500" />
-              <div>
-                <div class="text-xs font-bold text-rose-300">⏱️ Тест по таймеру</div>
-                <div class="flex items-center gap-2 mt-1">
-                  <span class="text-[10px] text-rose-300/70">Запустить через</span>
-                  <input bind:value={triggerDelay} type="number" class="w-16 px-2 py-1 rounded bg-black border border-rose-500/30 text-xs font-mono text-white text-center outline-none" />
-                  <span class="text-[10px] text-rose-300/70">сек после старта</span>
-                </div>
+              <div class="flex-1 flex items-center justify-between">
+                <div class="text-xs font-bold text-rose-300">⏱️ Тест: через</div>
+                <input bind:value={triggerDelay} type="number" class="w-14 px-1 py-1 rounded bg-black border border-rose-500/30 text-xs font-mono text-white text-center outline-none" />
+                <span class="text-[10px] text-rose-300/70">сек</span>
               </div>
             </label>
           </div>
 
-          <div class="space-y-1.5 pt-2 border-t border-[#2d2924]">
-            <label for="ambient-audio-select" class="text-[11px] text-[#a39e95]">Звуковое окружение (Ambient Audio)</label>
-            <div class="flex items-center gap-2">
-              <select id="ambient-audio-select" bind:value={ambientAudio} class="flex-1 px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-white outline-none">
-                {#each AUDIO_FILES as af}
-                  <option value={af.id}>{af.label}</option>
-                {/each}
-              </select>
-              {#if ambientAudio}
-                <button type="button" onclick={toggleAudioPreview} class="w-9 h-9 flex items-center justify-center rounded-lg bg-[#282420] border border-[#3d3831] text-amber-400 hover:bg-[#3d3831] transition-colors cursor-pointer" title="Прослушать звук">
-                  {previewAudioObj ? '⏹️' : '🔊'}
-                </button>
-              {/if}
-            </div>
-          </div>
-
-          <label class="flex items-center gap-2 p-2.5 rounded-lg bg-[#0f0e0d] border border-[#2d2924] cursor-pointer">
-            <input type="checkbox" bind:checked={isPassive} class="w-4 h-4 accent-amber-500" />
-            <span class="text-xs text-stone-300 leading-tight">
-              Скрытое событие (Без вызова 🔔)<br>
-              <span class="text-[9px] text-[#706b63]">Игрок должен сам заметить проблему визуально или на слух.</span>
-            </span>
-          </label>
-
-          <!-- Теги компетенций -->
-          <div class="pt-2 border-t border-[#2d2924]">
-            <label for="skills-list" class="text-[10px] font-bold text-[#706b63] uppercase tracking-wider block mb-2">Развиваемые навыки</label>
-            <div id="skills-list" class="flex flex-wrap gap-1.5">
-              {#each Object.keys(skills) as skill}
-                <label class="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-mono border cursor-pointer transition-all {skills[skill] ? 'bg-[#282420] border-amber-500 text-amber-300' : 'bg-[#0f0e0d] border-[#2d2924] text-[#706b63]'}">
-                  <input type="checkbox" bind:checked={skills[skill]} class="hidden" /> {skill}
+          <!-- Аудио и Скрытность -->
+          <div class="space-y-4 pt-2 border-t border-[#2d2924]">
+            <div class="space-y-2">
+              <label for="ambient-audio-select" class="text-[11px] text-[#a39e95]">Окружающий звук (Ambient)</label>
+              <div class="flex flex-col gap-2">
+                <div class="flex items-center gap-2">
+                  <select id="ambient-audio-select" bind:value={ambientAudio} class="flex-1 px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-white outline-none truncate">
+                    {#each AUDIO_FILES as af}
+                      <option value={af.id}>{af.label}</option>
+                    {/each}
+                  </select>
+                  {#if ambientAudio}
+                    <button type="button" onclick={toggleAudioPreview} class="w-9 h-9 flex items-center justify-center rounded-lg bg-[#282420] border border-[#3d3831] text-amber-400 hover:bg-[#3d3831] transition-colors cursor-pointer shrink-0" title="Прослушать звук">
+                      {previewAudioObj ? '⏹️' : '🔊'}
+                    </button>
+                  {/if}
+                </div>
+                <!-- Загрузка своего аудио -->
+                <label class="flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg border border-dashed border-[#3d3831] bg-[#0f0e0d] hover:border-amber-500/50 hover:text-amber-300 text-[10px] text-[#706b63] cursor-pointer transition-colors">
+                  <span>{isUploadingAudio ? 'Загрузка...' : '📁 Загрузить свой .mp3'}</span>
+                  <input type="file" accept="audio/*" class="hidden" onchange={handleAudioUpload} disabled={isUploadingAudio} />
                 </label>
-              {/each}
+              </div>
+            </div>
+
+            <label class="flex items-center gap-3 p-3 rounded-xl bg-[#0f0e0d] border border-[#2d2924] cursor-pointer">
+              <input type="checkbox" bind:checked={isPassive} class="w-4 h-4 accent-amber-500" />
+              <div class="text-xs text-stone-300 leading-tight">
+                <strong class="text-white">Скрытое событие (Без вызова 🔔)</strong><br>
+                <span class="text-[9px] text-[#706b63]">Игрок должен сам заметить визуал или аудио.</span>
+              </div>
+            </label>
+
+            <!-- Теги компетенций -->
+            <div class="pt-2 border-t border-[#2d2924]">
+              <label for="skills-list" class="text-[10px] font-bold text-[#706b63] uppercase tracking-wider block mb-2">Развиваемые навыки</label>
+              <div id="skills-list" class="flex flex-wrap gap-1.5">
+                {#each Object.keys(skills) as skill}
+                  <label class="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-mono border cursor-pointer transition-all {skills[skill] ? 'bg-[#282420] border-amber-500 text-amber-300' : 'bg-[#0f0e0d] border-[#2d2924] text-[#706b63]'}">
+                    <input type="checkbox" bind:checked={skills[skill]} class="hidden" /> {skill}
+                  </label>
+                {/each}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- ПРАВАЯ КОЛОНКА: ИИ Промпты -->
+      <!-- 3. ИНСТРУКЦИИ ИИ (LLM) -->
       <div class="lg:col-span-4 space-y-4">
         <div class="p-5 rounded-2xl bg-gradient-to-br from-[#1a1816] to-[#141210] border border-amber-900/40 shadow-[0_0_20px_rgba(245,158,11,0.05)] flex flex-col gap-4 h-full">
           <h3 class="text-xs font-bold text-amber-400 uppercase tracking-wider border-b border-amber-900/30 pb-2">3. Инструкции ИИ-Агенту (LLM)</h3>
@@ -311,7 +381,7 @@
 
           <div class="space-y-1.5 flex-1">
             <label for="expected-rule-textarea" class="text-[11px] text-[#a39e95]">Критерий успеха (Эталонный ответ проводника)</label>
-            <textarea id="expected-rule-textarea" bind:value={expectedRule} rows="4" class="w-full h-[calc(100%-20px)] px-3.5 py-2.5 rounded-xl bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-amber-300 outline-none leading-relaxed resize-none shadow-inner" placeholder="Правило: Вежливо извиниться и предложить..."></textarea>
+            <textarea id="expected-rule-textarea" bind:value={expectedRule} rows="5" class="w-full h-[calc(100%-20px)] px-3.5 py-2.5 rounded-xl bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-amber-300 outline-none leading-relaxed resize-none shadow-inner" placeholder="Правило: Вежливо извиниться и предложить..."></textarea>
           </div>
         </div>
       </div>

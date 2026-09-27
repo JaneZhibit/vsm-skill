@@ -16,7 +16,7 @@ services:
       - ../backend/app:/app/app
       - ../backend/data:/app/data
       - ../backend/tests:/app/tests
-      - ../storage:/app/storage:ro
+      - ../storage:/app/storage
     networks:
       - vsm_network
 

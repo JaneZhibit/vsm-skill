@@ -151,6 +151,7 @@ class LiveScenarioTrigger(BaseModel):
     value: Optional[int] = None          # Секунды (time) или км/ч (speed) или шанс % (random)
     parent_id: Optional[str] = None      # ID родительского инцидента (для chained)
     delay_sec: Optional[int] = 10        # Задержка в секундах (для test или chained)
+    condition: Optional[str] = "ignored" # "ignored" (игнорируется), "resolved" (решено)
 
 class CustomLiveScenarioPayload(BaseModel):
     incident_id: Optional[str] = None
@@ -203,6 +204,26 @@ async def create_live_scenario(payload: CustomLiveScenarioPayload):
         }
     }
     return {"status": "created", "incident_id": inc_id}
+
+@router.post("/upload-ambient-audio")
+async def upload_ambient_audio(file: UploadFile = File(...)):
+    """Эндпоинт для загрузки кастомных фоновых звуков из редактора."""
+    if not file.filename or not file.filename.lower().endswith(('.mp3', '.wav', '.ogg')):
+        raise HTTPException(400, "Только аудиофайлы (mp3, wav, ogg)")
+        
+    import shutil
+    from app.core.config import PROJECT_ROOT, BACKEND_DIR
+    storage_dir = PROJECT_ROOT / "storage"
+    if not storage_dir.exists():
+        storage_dir = BACKEND_DIR / "storage"
+    ambient_dir = storage_dir / "audio" / "ambient"
+    ambient_dir.mkdir(parents=True, exist_ok=True)
+    
+    file_path = ambient_dir / file.filename
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    return {"status": "uploaded", "filename": file.filename}
 
 
 class VoiceResolveRequest(BaseModel):

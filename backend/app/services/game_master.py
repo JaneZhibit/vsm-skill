@@ -13,6 +13,8 @@ class GameMaster:
         self.active_triggers: List[Dict[str, Any]] = []
         # Словарь для отслеживания запущенных событий: { "incident_id": время_старта_сек }
         self.running_incidents: Dict[str, float] = {}
+        # Словарь для отслеживания решенных событий: { "incident_id": время_решения_сек }
+        self.resolved_incidents: Dict[str, float] = {}
         self.crying_start_time: Optional[float] = None
         self.crying_seat_id: Optional[str] = None
         self.neighbor_complained: bool = False
@@ -21,6 +23,7 @@ class GameMaster:
     def init_triggers(self, mode: str = "pro", start_time: float = 50400.0) -> None:
         self.current_mode = mode
         self.running_incidents = {}
+        self.resolved_incidents = {}
         self.crying_start_time = None
         self.crying_seat_id = None
         self.neighbor_complained = False
@@ -179,13 +182,21 @@ class GameMaster:
         elif seats is None:
             seats = []
 
-        # Сначала очищаем running_incidents от тех, которые уже решили
+        # 1. Проверяем инциденты в салоне
         active_ids_in_cabin = [
             s.active_incident.incident_id if not isinstance(s.active_incident, dict) else s.active_incident["incident_id"]
             for s in seats if s.active_incident
         ]
+        
+        # Фиксируем инциденты, появившиеся в вагоне
+        for inc_id in active_ids_in_cabin:
+            if inc_id not in self.running_incidents and inc_id not in self.resolved_incidents:
+                self.running_incidents[inc_id] = current_time
+
+        # Если инцидент был в running, а теперь его нет в салоне -> значит он решен!
         keys_to_remove = [k for k in list(self.running_incidents.keys()) if k not in active_ids_in_cabin]
         for k in keys_to_remove:
+            self.resolved_incidents[k] = current_time  # Записываем время решения
             del self.running_incidents[k]
 
         events_to_fire = []
@@ -225,10 +236,19 @@ class GameMaster:
             elif t_type == "chained":
                 parent_id = trig_info.get("parent_id")
                 delay = trig_info.get("delay_sec", 0) or 0
-                # Если родительский инцидент сейчас активен и прошло нужное время
-                if parent_id in self.running_incidents:
-                    if current_time - self.running_incidents[parent_id] >= delay:
-                        should_fire = True
+                condition = trig_info.get("condition", "ignored")
+
+                if condition == "ignored":
+                    # Срабатывает, если родитель ВСЕ ЕЩЕ ВИСИТ нерешенным спустя delay секунд
+                    if parent_id in self.running_incidents:
+                        if current_time - self.running_incidents[parent_id] >= delay:
+                            should_fire = True
+
+                elif condition == "resolved":
+                    # Срабатывает, если родитель БЫЛ РЕШЕН спустя delay секунд после решения
+                    if parent_id in self.resolved_incidents:
+                        if current_time - self.resolved_incidents[parent_id] >= delay:
+                            should_fire = True
 
             if should_fire:
                 events_to_fire.append(trigger)
