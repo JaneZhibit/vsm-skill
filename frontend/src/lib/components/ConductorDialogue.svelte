@@ -2,6 +2,7 @@
   import { onDestroy } from 'svelte';
   import { fade, fly } from 'svelte/transition';
   import { trainWorld } from '../stores/trainWorld.svelte';
+  import { cabinState } from '../stores/cabinState.svelte';
   import { trainAudio } from '../stores/trainAudio.svelte';
   import { conductorState } from '../stores/conductorState.svelte';
   import type { ActiveIncident } from '../config/cabinConfig';
@@ -10,9 +11,9 @@
 
   type Stage = 'decision' | 'feedback' | 'learning_card';
 
-  let currentSeat = $derived(trainWorld.selectedSeat);
+  let currentSeat = $derived(cabinState.selectedSeat);
   let activeIncident = $derived(currentSeat?.activeIncident);
-  let dialogIncident = $state<ActiveIncident | null>(trainWorld.selectedSeat?.activeIncident || null);
+  let dialogIncident = $state<ActiveIncident | null>(cabinState.selectedSeat?.activeIncident || null);
   let currentIncident = $derived<ActiveIncident | null>(dialogIncident || activeIncident || null);
 
   let currentStepId = $state<string>('step_1');
@@ -55,11 +56,11 @@
   });
 
   let displayedText = $derived.by(() => {
-    if (stage === 'feedback') {
-      if (feedbackResult?.passenger_reply) return `«${feedbackResult.passenger_reply.replace(/^[«"]|[»"]$/g, '')}»`;
-      if (feedbackResult?.feedback) return `«${feedbackResult.feedback}»`;
-      return '';
-    }
+    // Теперь мы берем текст из feedbackResult ВСЕГДА, если он есть,
+    // чтобы пассажир не забывал свой последний аргумент при переключении обратно в микрофон!
+    if (feedbackResult?.passenger_reply) return `«${feedbackResult.passenger_reply.replace(/^[«"]|[»"]$/g, '')}»`;
+
+    // В самом начале берем промпт из конфигурации
     const inc = currentIncident;
     if (inc) {
       const rawPrompt = currentStep?.prompt ?? inc?.prompt;
@@ -77,7 +78,7 @@
 
   // --- ТАЙМЕРЫ И ИНЦИДЕНТЫ ---
   let currentSeatId = $derived(currentSeat?.id);
-  let boundSeatId = trainWorld.selectedSeat?.id || '';
+  let boundSeatId = cabinState.selectedSeat?.id || '';
   let initializedIncidentId = '';
 
   $effect(() => {
@@ -92,7 +93,7 @@
       currentStepId = activeIncident.start_step || 'step_1';
       timeLeft = currentStep?.timer_seconds || activeIncident.timer_seconds || 30;
       trainAudio.setAmbientDucking(true);
-      if (currentSeat?.passenger) trainWorld.playPassengerDialog(activeIncident.incident_id, currentSeat.passenger.archetype_id, currentSeat.passenger.trait);
+      if (currentSeat?.passenger) cabinState.playPassengerDialog(activeIncident.incident_id, currentSeat.passenger.archetype_id, currentSeat.passenger.trait);
       startTimer();
     }
   });
@@ -132,7 +133,7 @@
     isTimeout = true;
     stage = 'feedback';
     playErrorSound();
-    feedbackResult = await trainWorld.resolveIncident(currentIncident.incident_id, 'opt_timeout');
+    feedbackResult = await cabinState.resolveIncident(currentIncident.incident_id, 'opt_timeout');
   }
 
   async function executeOption(opt: any) {
@@ -153,7 +154,7 @@
     } else {
       stopTimer();
       stage = 'feedback';
-      if (currentIncident?.incident_id) feedbackResult = await trainWorld.resolveIncident(currentIncident.incident_id, opt.id);
+      if (currentIncident?.incident_id) feedbackResult = await cabinState.resolveIncident(currentIncident.incident_id, opt.id);
       if (feedbackResult?.loyalty_delta > 0 || feedbackResult?.is_passed) playSuccessSound(); else playErrorSound();
     }
   }
@@ -189,7 +190,7 @@
     stopTimer();
 
     let fillerAudio: HTMLAudioElement | null = null;
-    if (!trainWorld.isAudioMuted) {
+    if (!trainAudio.isAudioMuted) {
       fillerAudio = new Audio(`/storage/audio/fillers/filler_${Math.floor(Math.random() * 3) + 1}.mp3`);
       fillerAudio.volume = 0.75;
       fillerAudio.play().catch(() => {});
@@ -197,14 +198,14 @@
 
     try {
       const targetId = currentIncident?.incident_id || currentSeat?.id || 'free_talk';
-      const res = await trainWorld.resolveVoiceIncident(targetId, null, text, displayedText, currentStep?.expected_rule || 'Вежливое общение');
+      const res = await cabinState.resolveVoiceIncident(targetId, null, text, displayedText, currentStep?.expected_rule || 'Вежливое общение');
       if (fillerAudio) { fillerAudio.pause(); fillerAudio.currentTime = 0; }
 
       feedbackResult = res?.incident_result || res;
       stage = 'feedback';
       if (feedbackResult?.loyalty_delta >= 0 || feedbackResult?.is_passed) playSuccessSound(); else playErrorSound();
 
-      if (feedbackResult?.passenger_audio_base64 && !trainWorld.isAudioMuted) {
+      if (feedbackResult?.passenger_audio_base64 && !trainAudio.isAudioMuted) {
         setTimeout(() => {
           const audio = new Audio(`data:audio/mp3;base64,${feedbackResult.passenger_audio_base64}`);
           audio.volume = 0.9;
@@ -223,10 +224,6 @@
 
   onDestroy(resetDialogState);
 </script>
-
-<!-- (Остальная часть с HTML-сниппетами {#snippet VoiceInterface()} остается без изменений,
-     нужно только заменить isRecording на voiceRecognition.isRecording и
-     finalTranscript на voiceRecognition.finalTranscript внутри сниппета). -->
 
 <!-- ОСНОВНОЙ КОНТЕЙНЕР ДИАЛОГА -->
 <div class="vn-dialogue-box" transition:fly={{ y: 40, duration: 200 }}>
@@ -258,17 +255,17 @@
           {@render VoiceInterface()}
           <div class="flex gap-2 justify-end pt-1 border-t border-[#3d3831]/50">
             {#if currentSeat.ticketStatus !== 'validated'}
-              <button class="action-btn text-emerald-300 text-xs" onclick={() => trainWorld.validateCurrentSeat()}>📲 Проверить (АСКП)</button>
+              <button class="action-btn text-emerald-300 text-xs" onclick={() => cabinState.validateCurrentSeat()}>📲 Проверить (АСКП)</button>
             {/if}
-            <button class="action-btn text-stone-400 text-xs" onclick={() => trainWorld.switchView('aisle')}>⬅ В проход</button>
+            <button class="action-btn text-stone-400 text-xs" onclick={() => cabinState.switchView('aisle')}>⬅ В проход</button>
           </div>
         </div>
       {:else}
         <div class="flex gap-2 justify-end">
           {#if currentSeat?.isOccupied && currentSeat.ticketStatus !== 'validated'}
-            <button class="action-btn text-emerald-300" onclick={() => trainWorld.validateCurrentSeat()}>📲 Проверить (АСКП)</button>
+            <button class="action-btn text-emerald-300" onclick={() => cabinState.validateCurrentSeat()}>📲 Проверить (АСКП)</button>
           {/if}
-          <button class="action-btn text-stone-400" onclick={() => trainWorld.switchView('aisle')}>⬅ В проход</button>
+          <button class="action-btn text-stone-400" onclick={() => cabinState.switchView('aisle')}>⬅ В проход</button>
         </div>
       {/if}
     {/if}
@@ -343,7 +340,6 @@
   </div>
 {/snippet}
 
-<!-- Остальные сниппеты (ChoicesInterface, LearningCardInterface, FeedbackInterface) и стили без изменений -->
 {#snippet ChoicesInterface()}
   <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
     {#each dynamicOptions as opt, idx}
@@ -377,9 +373,19 @@
   <div class="flex flex-col gap-2.5 bg-[#1a1816] border border-[#4a433a] rounded-lg p-3" in:fade={{ duration: 150 }}>
     <div class="flex justify-between items-center border-b border-[#3d3831] pb-2">
       <div class="flex items-center gap-2">
-        <span class="px-2 py-1 rounded text-xs font-bold {isTimeout || feedbackResult?.is_passed === false ? 'bg-rose-900/50 text-rose-400 border border-rose-500' : 'bg-emerald-900/50 text-emerald-400 border border-emerald-500'}">
-          {isTimeout ? '⏱️ Время вышло' : feedbackResult?.is_passed === false ? '❌ Ошибка' : '✅ Решено'}
-        </span>
+        {#if isTimeout || feedbackResult?.dialog_status === 'failed'}
+          <span class="px-2 py-1 rounded text-xs font-bold bg-rose-900/50 text-rose-400 border border-rose-500">
+            {isTimeout ? '⏱️ Время вышло' : '❌ Провал (Диалог окончен)'}
+          </span>
+        {:else if feedbackResult?.dialog_status === 'continue'}
+          <span class="px-2 py-1 rounded text-xs font-bold bg-blue-900/50 text-blue-400 border border-blue-500">
+            💬 Диалог продолжается
+          </span>
+        {:else}
+          <span class="px-2 py-1 rounded text-xs font-bold bg-emerald-900/50 text-emerald-400 border border-emerald-500">
+            ✅ Инцидент решен
+          </span>
+        {/if}
         <span class="text-xs font-bold text-white">{feedbackResult?.feedback_title || ''}</span>
       </div>
       {#if feedbackResult && feedbackResult.loyalty_delta !== undefined}
@@ -399,12 +405,20 @@
       </div>
     {/if}
     <p class="text-xs text-[#a39e95] leading-relaxed pt-0.5">
-      <strong class="text-amber-300 block mb-0.5">Разбор инструктора:</strong>
-      {feedbackResult?.feedback || 'Анализ...'}
+      <strong class="text-amber-300 block mb-0.5">Анализ нейросети:</strong>
+      {feedbackResult?.feedback || 'Оценка диалога...'}
     </p>
-    <button class="self-end px-5 py-2 mt-1 bg-gradient-to-r from-amber-600 to-amber-500 text-stone-950 font-bold text-xs rounded-lg shadow-md" onclick={handleComplete} disabled={!feedbackResult}>
-      {currentIncident ? 'Завершить инцидент ➔' : 'Продолжить диалог ➔'}
-    </button>
+
+    <!-- Выбор следующего шага -->
+    {#if feedbackResult?.dialog_status === 'continue'}
+      <button class="self-end px-5 py-2 mt-1 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 text-white font-bold text-xs rounded-lg shadow-md transition-all cursor-pointer" onclick={() => { stage = 'decision'; timeLeft = currentStep?.timer_seconds || 30; startTimer(); }}>
+        Ответить пассажиру ➔
+      </button>
+    {:else}
+      <button class="self-end px-5 py-2 mt-1 bg-gradient-to-r from-amber-600 to-amber-500 text-stone-950 font-bold text-xs rounded-lg shadow-md cursor-pointer" onclick={handleComplete} disabled={!feedbackResult}>
+        {currentIncident ? 'Завершить инцидент ➔' : 'Завершить диалог ➔'}
+      </button>
+    {/if}
   </div>
 {/snippet}
 

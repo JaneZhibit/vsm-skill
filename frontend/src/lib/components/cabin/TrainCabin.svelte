@@ -44,7 +44,7 @@
   );
 
   const cabinImageSrc = $derived(
-    isCabinEmpty ? '/assets/cabin.png' : '/assets/cabin_aisle_transparent.png'
+    isCabinEmpty ? '/assets/cabin.jpg' : '/assets/cabin_aisle_transparent.png'
   );
 
   function getSeatCoords(seatId: string) {
@@ -295,61 +295,67 @@
   </div>
 
   {#if cabinState.currentView === 'aisle'}
-    <div class="bottom-ui-panel">
-      <!-- Кнопка поверх всего -->
-      <div class="pointer-events-auto w-full flex justify-center z-[50] relative">
-        {#if isTripFinished}
-          <button onclick={() => { isDebriefOpen = true; }} disabled={!trainWorld.isPostTripDone} class="px-8 py-3 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-400 hover:from-emerald-500 text-white font-extrabold rounded-full shadow-[0_0_25px_rgba(16,185,129,0.5)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer border border-emerald-300 text-sm tracking-wide disabled:opacity-50 disabled:grayscale disabled:hover:scale-100 disabled:animate-none {trainWorld.isPostTripDone ? 'animate-bounce' : ''}">
-            <span>{trainWorld.isPostTripDone ? '🏁 Завершить смену и подвести итоги ➔' : '🧹 Проведите осмотр и уборку вагона...'}</span>
-          </button>
-        {:else if cabinState.alertSeatsCount > 0}
-          {@const incSeat = cabinState.seats.find((s) => s.activeIncident != null)}
-          <button onclick={() => handleCallClick(incSeat?.id)} class="px-6 py-2.5 bg-gradient-to-r from-rose-600 to-amber-500 text-white font-bold rounded-full shadow-[0_0_20px_rgba(244,63,94,0.6)] animate-pulse flex items-center gap-2 cursor-pointer border border-rose-300">
-            <span>🚨 Место {incSeat?.id}: требуется решение проводника ➔</span>
-          </button>
-        {:else if conductorState.shiftPhase === 'initial_round'}
-          {#if trainWorld.preTripNeedsRadio}
-            <button disabled class="px-6 py-2.5 bg-rose-900 text-rose-300 font-bold rounded-full shadow-lg border border-rose-500 opacity-80 cursor-not-allowed">
-              <span>📻 Доложите о неисправностях по рации...</span>
+    <!-- Проверяем, открыта ли прямо сейчас мини-игра приемки -->
+    {@const isPreTripGameActive = conductorState.shiftPhase === 'initial_round' && !trainWorld.isPreTripDone && !trainWorld.preTripNeedsRadio}
+
+    <!-- Скрываем нижнюю панель полностью, если мы заняты заполнением чек-листа -->
+    {#if !isPreTripGameActive}
+      <div class="bottom-ui-panel">
+        <!-- Кнопка поверх всего -->
+        <div class="pointer-events-auto w-full flex justify-center z-[50] relative">
+          {#if isTripFinished}
+            <button onclick={() => { isDebriefOpen = true; }} disabled={!trainWorld.isPostTripDone} class="px-8 py-3 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-400 hover:from-emerald-500 text-white font-extrabold rounded-full shadow-[0_0_25px_rgba(16,185,129,0.5)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer border border-emerald-300 text-sm tracking-wide disabled:opacity-50 disabled:grayscale disabled:hover:scale-100 disabled:animate-none {trainWorld.isPostTripDone ? 'animate-bounce' : ''}">
+              <span>{trainWorld.isPostTripDone ? '🏁 Завершить смену и подвести итоги ➔' : '🧹 Проведите осмотр и уборку вагона...'}</span>
             </button>
-          {:else}
-            <button onclick={() => { playSuccessSound(); trainWorld.startCruisePhase(); }} disabled={!trainWorld.isPreTripDone} class="px-6 py-2.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 font-bold rounded-full shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:grayscale disabled:hover:scale-100">
-              <span>{trainWorld.isPreTripDone ? '🚪 Начать посадку и отправиться (14:00) ➔' : '🔍 Проведите приемку вагона перед рейсом...'}</span>
+          {:else if cabinState.alertSeatsCount > 0}
+            {@const incSeat = cabinState.seats.find((s) => s.activeIncident != null)}
+            <button onclick={() => handleCallClick(incSeat?.id)} class="px-6 py-2.5 bg-gradient-to-r from-rose-600 to-amber-500 text-white font-bold rounded-full shadow-[0_0_20px_rgba(244,63,94,0.6)] animate-pulse flex items-center gap-2 cursor-pointer border border-rose-300">
+              <span>🚨 Место {incSeat?.id}: требуется решение проводника ➔</span>
+            </button>
+          {:else if conductorState.shiftPhase === 'initial_round'}
+            {#if trainWorld.preTripNeedsRadio}
+              <button disabled class="px-6 py-2.5 bg-rose-900 text-rose-300 font-bold rounded-full shadow-lg border border-rose-500 opacity-80 cursor-not-allowed">
+                <span>📻 Доложите о неисправностях по рации...</span>
+              </button>
+            {:else}
+              <button onclick={() => { playSuccessSound(); trainWorld.startCruisePhase(); }} disabled={!trainWorld.isPreTripDone} class="px-6 py-2.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 font-bold rounded-full shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:grayscale disabled:hover:scale-100">
+                <span>{trainWorld.isPreTripDone ? '🚪 Начать посадку и отправиться (14:00) ➔' : '🔍 Проведите приемку вагона перед рейсом...'}</span>
+              </button>
+            {/if}
+          {:else if conductorState.shiftPhase === 'cruise'}
+            <button onclick={() => { playClickSound(); trainWorld.skipToNextEvent(); }} class="px-6 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-500 hover:from-cyan-500 hover:to-teal-400 text-white font-bold rounded-full shadow-[0_4px_20px_rgba(6,182,212,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer">
+              <span>⏩ Промотать до события ➔</span>
+            </button>
+          {:else if conductorState.shiftPhase === 'station_warning' || conductorState.shiftPhase === 'tver_warning'}
+            <button onclick={() => { playClickSound(); trainWorld.skipToNextEvent(); }} class="px-6 py-2.5 bg-gradient-to-r from-rose-600 to-orange-500 hover:from-rose-500 hover:to-orange-400 text-white font-bold rounded-full shadow-[0_4px_20px_rgba(225,29,72,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer">
+              <span>🚉 Перейти к прибытию ➔</span>
+            </button>
+          {:else if conductorState.shiftPhase === 'arrival'}
+            <button onclick={() => { playSuccessSound(); trainWorld.startCruisePhase(); }} class="px-6 py-2.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 font-bold rounded-full shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer">
+              <span>⏩ Отправление дальше ➔</span>
             </button>
           {/if}
-        {:else if conductorState.shiftPhase === 'cruise'}
-          <button onclick={() => { playClickSound(); trainWorld.skipToNextEvent(); }} class="px-6 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-500 hover:from-cyan-500 hover:to-teal-400 text-white font-bold rounded-full shadow-[0_4px_20px_rgba(6,182,212,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer">
-            <span>⏩ Промотать до события ➔</span>
-          </button>
-        {:else if conductorState.shiftPhase === 'station_warning' || conductorState.shiftPhase === 'tver_warning'}
-          <button onclick={() => { playClickSound(); trainWorld.skipToNextEvent(); }} class="px-6 py-2.5 bg-gradient-to-r from-rose-600 to-orange-500 hover:from-rose-500 hover:to-orange-400 text-white font-bold rounded-full shadow-[0_4px_20px_rgba(225,29,72,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer">
-            <span>🚉 Перейти к прибытию ➔</span>
-          </button>
-        {:else if conductorState.shiftPhase === 'arrival'}
-          <button onclick={() => { playSuccessSound(); trainWorld.startCruisePhase(); }} class="px-6 py-2.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 font-bold rounded-full shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer">
-            <span>⏩ Отправление дальше ➔</span>
-          </button>
+        </div>
+
+        <!-- СКРЫВАЕМ таймлайн (шкалу), если мы уже на станции прибытия/уборки -->
+        {#if !isTripFinished && conductorState.shiftPhase !== 'arrival'}
+        <div class="pointer-events-auto w-full bg-[#141210]/95 backdrop-blur-md border border-[#3d3831] rounded-2xl p-3 sm:p-4 shadow-2xl flex flex-col gap-2 relative z-10">
+          <div class="flex justify-between items-center text-[11px] font-mono text-[#a39e95] uppercase font-semibold">
+            <span class="text-[#f5f3ef] bg-[#282420] px-2 py-0.5 rounded border border-[#3d3831]">🕒 {physicsState.formattedTime}</span>
+            <div class="text-center flex flex-col items-center">
+              <span class="text-amber-400 text-xs">След: {physicsState.nextStation?.label || 'Санкт-Петербург Главный'}</span>
+              <span class="text-[10px] opacity-70">Прибытие: {physicsState.nextStation?.plannedTime || '16:15'}</span>
+            </div>
+            <span>С-Петербург (16:15)</span>
+          </div>
+          <div class="relative w-full h-1.5 bg-[#2d2924] rounded-full mt-1">
+            <div class="absolute top-0 left-0 h-full bg-amber-500 rounded-full transition-all duration-1000 ease-out" style="width: {physicsState.progressPercent}%"></div>
+            <div class="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white border-2 border-amber-500 rounded-full shadow-[0_0_10px_rgba(245,158,11,0.8)] transition-all duration-1000 ease-out" style="left: {physicsState.progressPercent}%"></div>
+          </div>
+        </div>
         {/if}
       </div>
-
-      <!-- СКРЫВАЕМ таймлайн (шкалу), если мы уже на станции прибытия/уборки -->
-      {#if !isTripFinished && conductorState.shiftPhase !== 'arrival'}
-      <div class="pointer-events-auto w-full bg-[#141210]/95 backdrop-blur-md border border-[#3d3831] rounded-2xl p-3 sm:p-4 shadow-2xl flex flex-col gap-2 relative z-10">
-        <div class="flex justify-between items-center text-[11px] font-mono text-[#a39e95] uppercase font-semibold">
-          <span class="text-[#f5f3ef] bg-[#282420] px-2 py-0.5 rounded border border-[#3d3831]">🕒 {physicsState.formattedTime}</span>
-          <div class="text-center flex flex-col items-center">
-            <span class="text-amber-400 text-xs">След: {physicsState.nextStation?.label || 'Санкт-Петербург Главный'}</span>
-            <span class="text-[10px] opacity-70">Прибытие: {physicsState.nextStation?.plannedTime || '16:15'}</span>
-          </div>
-          <span>С-Петербург (16:15)</span>
-        </div>
-        <div class="relative w-full h-1.5 bg-[#2d2924] rounded-full mt-1">
-          <div class="absolute top-0 left-0 h-full bg-amber-500 rounded-full transition-all duration-1000 ease-out" style="width: {physicsState.progressPercent}%"></div>
-          <div class="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white border-2 border-amber-500 rounded-full shadow-[0_0_10px_rgba(245,158,11,0.8)] transition-all duration-1000 ease-out" style="left: {physicsState.progressPercent}%"></div>
-        </div>
-      </div>
-      {/if}
-    </div>
+    {/if}
   {:else}
     <div class="dialogue-wrapper">
       <ConductorDialogue />

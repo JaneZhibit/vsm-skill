@@ -26,6 +26,7 @@ class CustomLiveScenarioPayload(BaseModel):
     passenger_state: Optional[str] = None
     is_passive: bool = False
     llm_system_prompt: str
+    initial_phrase: Optional[str] = ""
     expected_rule: str
     skills: List[str] = []
 
@@ -47,6 +48,7 @@ async def get_live_scenarios():
             "is_passive": v.get("is_passive", False),
             "skills": v.get("skills", []),
             "expected_rule": v.get("expected_rule") or v.get("steps", {}).get("step_1", {}).get("expected_rule", ""),
+            "initial_phrase": v.get("steps", {}).get("step_1", {}).get("prompt", ""),
             "llm_system_prompt": v.get("llm_system_prompt", ""),
         })
     return result
@@ -79,7 +81,7 @@ async def create_live_scenario(payload: CustomLiveScenarioPayload):
         "start_step": "step_1",
         "steps": {
             "step_1": {
-                "prompt": payload.llm_system_prompt,
+                "prompt": payload.initial_phrase or payload.llm_system_prompt,
                 "expected_rule": payload.expected_rule,
                 "phase": "passive" if payload.is_passive else "urgent",
                 "options": []
@@ -128,3 +130,38 @@ async def upload_ambient_audio(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
         
     return {"status": "uploaded", "filename": file.filename}
+
+
+@router.get("/assets-list")
+async def get_dynamic_assets():
+    """
+    Динамически сканирует папки и возвращает списки существующих
+    эмбиент-звуков и картинок-эмоций персонажей.
+    """
+    # 1. Сканируем аудио
+    storage_dir = PROJECT_ROOT / "storage"
+    ambient_dir = storage_dir / "audio" / "ambient"
+
+    audio_files = []
+    if ambient_dir.exists():
+        for f in ambient_dir.glob("*"):
+            if f.suffix.lower() in ['.mp3', '.wav', '.ogg']:
+                audio_files.append({"id": f.name, "label": f"🎵 {f.name}"})
+
+    # 2. Сканируем картинки (спрайты)
+    # В Vite статичные файлы лежат в папке public/assets
+    frontend_assets_dir = PROJECT_ROOT / "frontend" / "public" / "assets"
+    sprites_map = {}
+
+    if frontend_assets_dir.exists():
+        for arch_dir in frontend_assets_dir.iterdir():
+            if arch_dir.is_dir() and arch_dir.name in ["male_young", "female_young", "female_elderly", "any"]:
+                # Получаем имена файлов без расширения (например, "vaping_calm")
+                moods = [f.stem for f in arch_dir.glob("*.png")]
+                if moods:
+                    sprites_map[arch_dir.name] = moods
+
+    return {
+        "audio": audio_files,
+        "sprites": sprites_map
+    }

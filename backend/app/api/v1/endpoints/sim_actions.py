@@ -11,17 +11,20 @@ from app.services.polza_service import polza_ai
 
 router = APIRouter()
 
+
 class SpawnSpecificRequest(BaseModel):
     incident_id: str
 
+
 @router.post("/trip/spawn-specific", response_model=CabinManifestResponse)
 async def trigger_specific_incident(
-    payload: SpawnSpecificRequest,
-    user: Dict[str, Any] = Depends(get_current_user),
+        payload: SpawnSpecificRequest,
+        user: Dict[str, Any] = Depends(get_current_user),
 ):
     engine = trip_manager.get_trip(user["id"])
     engine.spawn_incident(force_incident=payload.incident_id)
     return engine.get_manifest()
+
 
 @router.post("/trip/spawn-random", response_model=CabinManifestResponse)
 async def trigger_random_incident(user: Dict[str, Any] = Depends(get_current_user)):
@@ -29,12 +32,15 @@ async def trigger_random_incident(user: Dict[str, Any] = Depends(get_current_use
     engine.spawn_incident()
     return engine.get_manifest()
 
+
 class ResolveIncidentRequest(BaseModel):
     incident_id: str
     option_id: str
 
+
 @router.post("/resolve-incident")
-async def resolve_simulation_incident(payload: ResolveIncidentRequest, user: Dict[str, Any] = Depends(get_current_user)):
+async def resolve_simulation_incident(payload: ResolveIncidentRequest,
+                                      user: Dict[str, Any] = Depends(get_current_user)):
     scenario_result = get_scenario_result(payload.incident_id, payload.option_id)
     if not scenario_result:
         raise HTTPException(status_code=400, detail="Неверный ID инцидента или опции")
@@ -56,7 +62,7 @@ async def resolve_simulation_incident(payload: ResolveIncidentRequest, user: Dic
         safety_delta=protected_result.get("safety_delta", 0),
         feedback=protected_result.get("feedback", ""),
     )
-    
+
     engine.resolve_incident(payload.incident_id, protected_result)
 
     return {
@@ -74,10 +80,11 @@ class VoiceResolveRequest(BaseModel):
     passenger_prompt: Optional[str] = ""
     expected_rule: Optional[str] = ""
 
+
 @router.post("/trip/voice-resolve")
 async def resolve_voice_incident(
-    payload: VoiceResolveRequest,
-    user: Dict[str, Any] = Depends(get_current_user),
+        payload: VoiceResolveRequest,
+        user: Dict[str, Any] = Depends(get_current_user),
 ):
     conductor_speech = ""
     if payload.audio_base64:
@@ -89,13 +96,13 @@ async def resolve_voice_incident(
         return {
             "status": "empty_speech",
             "incident_result": {
+                "dialog_status": "continue",
                 "loyalty_delta": 0,
                 "safety_delta": 0,
                 "mood": "annoyed",
                 "passenger_reply": "Вы что-то сказали? Я не расслышал.",
                 "feedback_title": "Голос не распознан",
                 "feedback": "Повторите четче.",
-                "is_passed": False
             }
         }
 
@@ -105,8 +112,8 @@ async def resolve_voice_incident(
     allowed_moods = incident_meta.get("allowed_moods")
 
     active_seat = next((s for s in engine.passenger_manager.seats if s.active_incident and (
-        (isinstance(s.active_incident, dict) and s.active_incident.get("incident_id") == payload.incident_id) or
-        (getattr(s.active_incident, "incident_id", None) == payload.incident_id)
+            (isinstance(s.active_incident, dict) and s.active_incident.get("incident_id") == payload.incident_id) or
+            (getattr(s.active_incident, "incident_id", None) == payload.incident_id)
     )), None)
 
     if not active_seat:
@@ -136,7 +143,8 @@ async def resolve_voice_incident(
         if not hasattr(active_seat.passenger, "dialog_history") or active_seat.passenger.dialog_history is None:
             active_seat.passenger.dialog_history = []
         active_seat.passenger.dialog_history.append({"role": "user", "content": f"Проводник: «{conductor_speech}»"})
-        active_seat.passenger.dialog_history.append({"role": "assistant", "content": f"Пассажир: «{passenger_reply_text}»"})
+        active_seat.passenger.dialog_history.append(
+            {"role": "assistant", "content": f"Пассажир: «{passenger_reply_text}»"})
         if len(active_seat.passenger.dialog_history) > 6:
             active_seat.passenger.dialog_history = active_seat.passenger.dialog_history[-6:]
 
@@ -147,17 +155,18 @@ async def resolve_voice_incident(
         passenger_audio_b64 = await polza_ai.generate_speech_base64(passenger_reply_text, archetype, trait)
 
     if "butterfly_effect" in eval_result:
-        engine.game_master.spawn_incident(engine.passenger_manager.seats, force_incident=eval_result["butterfly_effect"])
+        engine.game_master.spawn_incident(engine.passenger_manager.seats,
+                                          force_incident=eval_result["butterfly_effect"])
         engine.resolve_incident(payload.incident_id, eval_result)
         return {
             "status": "resolved",
             "transcription": conductor_speech,
             "manifest": engine.get_manifest(),
             "incident_result": {
+                "dialog_status": "resolved",
                 "loyalty_delta": 0,
                 "safety_delta": 0,
                 "mood": "sick",
-                "is_passed": True,
                 "passenger_reply": passenger_reply_text,
                 "passenger_audio_base64": passenger_audio_b64,
                 "feedback": f"Пассажир ответил: «{passenger_reply_text}». Вы перешли к поиску помощи.",
@@ -166,31 +175,69 @@ async def resolve_voice_incident(
             },
         }
 
-    updated_user = await log_action(
-        user_id=user["id"],
-        incident_id=payload.incident_id,
-        option_id="voice_response",
-        loyalty_delta=eval_result.get("loyalty_delta", 0),
-        safety_delta=eval_result.get("safety_delta", 0),
-        feedback=eval_result.get("feedback_text", ""),
-    )
-    engine.resolve_incident(payload.incident_id, eval_result)
+    # НОВАЯ ЛОГИКА МНОГОШАГОВОГО ДИАЛОГА
+    dialog_status = eval_result.get("dialog_status", "resolved")
 
-    return {
-        "status": "resolved",
-        "transcription": conductor_speech,
-        "user": updated_user,
-        "manifest": engine.get_manifest(),
-        "incident_result": {
-            "loyalty_delta": eval_result.get("loyalty_delta", 0),
-            "safety_delta": eval_result.get("safety_delta", 0),
-            "mood": eval_result.get("mood", "calm"),
-            "passenger_reply": passenger_reply_text,
-            "passenger_audio_base64": passenger_audio_b64,
-            "feedback": eval_result.get("feedback_text", "Оценено."),
-            "feedback_title": eval_result.get("feedback_title", "Анализ ответа"),
-            "role_model_steps": eval_result.get("role_model_steps_covered", []),
-            "is_passed": eval_result.get("is_passed", True),
+    if dialog_status == "continue":
+        # Обновляем только лицо пассажира и логируем попытку, но НЕ закрываем инцидент
+        if active_seat and active_seat.passenger:
+            active_seat.passenger.state = eval_result.get("mood", active_seat.passenger.state)
+            sprite_mood = "neutral" if active_seat.passenger.state == "calm" else active_seat.passenger.state
+            active_seat.passenger.sprite_url = f"/assets/{active_seat.passenger.archetype_id}/{sprite_mood}.png"
+
+        updated_user = await log_action(
+            user_id=user["id"],
+            incident_id=payload.incident_id,
+            option_id="voice_response_continue",
+            loyalty_delta=eval_result.get("loyalty_delta", 0),
+            safety_delta=eval_result.get("safety_delta", 0),
+            feedback=eval_result.get("feedback_text", ""),
+        )
+        return {
+            "status": "continue",
             "transcription": conductor_speech,
-        },
-    }
+            "user": updated_user,
+            "manifest": engine.get_manifest(),
+            "incident_result": {
+                "dialog_status": "continue",
+                "loyalty_delta": eval_result.get("loyalty_delta", 0),
+                "safety_delta": eval_result.get("safety_delta", 0),
+                "mood": eval_result.get("mood", "calm"),
+                "passenger_reply": passenger_reply_text,
+                "passenger_audio_base64": passenger_audio_b64,
+                "feedback": eval_result.get("feedback_text", "Пассажир ожидает аргументов."),
+                "feedback_title": eval_result.get("feedback_title", "Продолжение диалога"),
+                "role_model_steps": eval_result.get("role_model_steps_covered", []),
+                "transcription": conductor_speech,
+            }
+        }
+    else:
+        # Диалог завершен (успех или скандал)
+        updated_user = await log_action(
+            user_id=user["id"],
+            incident_id=payload.incident_id,
+            option_id="voice_response_final",
+            loyalty_delta=eval_result.get("loyalty_delta", 0),
+            safety_delta=eval_result.get("safety_delta", 0),
+            feedback=eval_result.get("feedback_text", ""),
+        )
+        engine.resolve_incident(payload.incident_id, eval_result)
+
+        return {
+            "status": "resolved",
+            "transcription": conductor_speech,
+            "user": updated_user,
+            "manifest": engine.get_manifest(),
+            "incident_result": {
+                "dialog_status": dialog_status,
+                "loyalty_delta": eval_result.get("loyalty_delta", 0),
+                "safety_delta": eval_result.get("safety_delta", 0),
+                "mood": eval_result.get("mood", "calm"),
+                "passenger_reply": passenger_reply_text,
+                "passenger_audio_base64": passenger_audio_b64,
+                "feedback": eval_result.get("feedback_text", "Оценено."),
+                "feedback_title": eval_result.get("feedback_title", "Анализ ответа"),
+                "role_model_steps": eval_result.get("role_model_steps_covered", []),
+                "transcription": conductor_speech,
+            },
+        }

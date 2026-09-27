@@ -1,6 +1,7 @@
 import json
 import base64
 from typing import Dict, Any, Optional
+
 try:
     import httpx
 except ImportError:
@@ -47,11 +48,11 @@ class PolzaAIService:
             return "Ошибка сети при распознавании."
 
     async def generate_speech_base64(
-        self,
-        text: str,
-        archetype: str = "female_young",
-        trait: str = "polite",
-        voice: Optional[str] = None
+            self,
+            text: str,
+            archetype: str = "female_young",
+            trait: str = "polite",
+            voice: Optional[str] = None
     ) -> Optional[str]:
         """Синтез речи (TTS) через Google Gemini 3.8 Flash TTS."""
         if not self.api_key or self.api_key == "your_polza_api_key_here":
@@ -59,8 +60,8 @@ class PolzaAIService:
 
         # Подбор голоса по архетипу (Google Gemini 3.8 Flash TTS)
         voice_map = {
-            "male_young": "Puck",         # Оптимистичный, живой (Молодой парень)
-            "female_young": "Leda",       # Юный, молодёжный (Девушка)
+            "male_young": "Puck",  # Оптимистичный, живой (Молодой парень)
+            "female_young": "Leda",  # Юный, молодёжный (Девушка)
             "female_elderly": "Sulafat",  # Тёплый, уютный (Бабушка)
             "any": "Puck"
         }
@@ -91,9 +92,10 @@ class PolzaAIService:
     def _offline_evaluate(self, conductor_text: str, conductor_gender: str = "m") -> Dict[str, Any]:
         """Интеллектуальный офлайн-оценщик для отказоустойчивости при сбоях сети."""
         low_text = conductor_text.lower()
-        if any(w in low_text for w in ["бэтмен", "спать", "пошел", "нафиг", "песня", "трактор", "чушь", "бред", "дурак"]):
+        if any(w in low_text for w in
+               ["бэтмен", "спать", "пошел", "нафиг", "песня", "трактор", "чушь", "бред", "дурак"]):
             return {
-                "is_passed": False,
+                "dialog_status": "failed",  # <--- ЗАМЕНЕНО
                 "loyalty_delta": -50,
                 "safety_delta": -50,
                 "mood": "annoyed",
@@ -110,13 +112,13 @@ class PolzaAIService:
                 "mood": "sick",
                 "loyalty_delta": 0,
                 "safety_delta": 0,
-                "is_passed": True,
+                "dialog_status": "continue",  # <--- ЗАМЕНЕНО
                 "feedback_title": "Ожидание помощи",
                 "role_model_steps_covered": ["Эмпатия", "Правило", "Решение"]
             }
         if ("подним" in low_text or "тянут" in low_text or "сама" in low_text) and conductor_gender == "f":
             return {
-                "is_passed": True,
+                "dialog_status": "resolved",  # <--- ЗАМЕНЕНО
                 "loyalty_delta": 15,
                 "safety_delta": 20,
                 "mood": "happy",
@@ -126,7 +128,7 @@ class PolzaAIService:
                 "role_model_steps_covered": ["Эмпатия", "Правило", "Решение"]
             }
         return {
-            "is_passed": True,
+            "dialog_status": "resolved",  # <--- ЗАМЕНЕНО
             "loyalty_delta": 20,
             "safety_delta": 25,
             "mood": "neutral",
@@ -137,24 +139,26 @@ class PolzaAIService:
         }
 
     async def evaluate_conductor_voice_response(
-        self,
-        incident_title: str,
-        passenger_prompt: str,
-        conductor_text: str,
-        expected_rule: str,
-        passenger_profile: Optional[dict] = None,
-        conductor_gender: str = "m",
-        ai_persona: str = "",
-        allowed_moods: Optional[list] = None,
-        dialog_history: Optional[list] = None
+            self,
+            incident_title: str,
+            passenger_prompt: str,
+            conductor_text: str,
+            expected_rule: str,
+            passenger_profile: Optional[dict] = None,
+            conductor_gender: str = "m",
+            ai_persona: str = "",
+            allowed_moods: Optional[list] = None,
+            dialog_history: Optional[list] = None
     ) -> Dict[str, Any]:
         cond_gender_str = "Мужчина" if conductor_gender == "m" else "Девушка"
         profile = passenger_profile or {}
         trait = profile.get("trait", "polite")
-        trait_ru = {"polite": "вежливый и спокойный", "demanding": "требовательный скандалист", "anxious": "тревожный и нервный"}.get(trait, "нейтральный")
-        
+        trait_ru = {"polite": "вежливый и спокойный", "demanding": "требовательный скандалист",
+                    "anxious": "тревожный и нервный"}.get(trait, "нейтральный")
+
         # Доступные картинки-спрайты (выбранные в Студии или базовые)
-        default_sprites = ["neutral", "angry", "vaping", "crying_child", "drunk", "sleeping", "happy", "annoyed", "sick"]
+        default_sprites = ["neutral", "angry", "vaping", "crying_child", "drunk", "sleeping", "happy", "annoyed",
+                           "sick"]
         sprites = [m for m in allowed_moods if m] if (allowed_moods and len(allowed_moods) > 0) else default_sprites
 
         system_prompt = f"""
@@ -172,11 +176,14 @@ class PolzaAIService:
 Правило, которому он должен был следовать: {expected_rule}.
 
 ЗАДАЧА:
-1. Ответь проводнику строго в соответствии со своим характером ({trait_ru}). Если он груб или не решил проблему — возмущайся. Если вежлив и прав — соглашайся. В свободном разговоре поддерживай естественный диалог пассажира скоростного поезда с учетом контекста беседы.
-2. Выбери свое визуальное состояние (спрайт) строго из списка: {sprites}.
-3. Оцени проводника.
+1. Ответь проводнику в соответствии со своим характером.
+2. Выбери свое визуальное состояние (спрайт) из списка: {sprites}.
+3. Выбери статус развития диалога (dialog_status):
+   - "resolved": проводник всё грамотно объяснил по правилам ({expected_rule}), конфликт исчерпан, ты соглашаешься и выполняешь просьбу.
+   - "failed": проводник нахамил, перешел на "ты", угрожает без причины или сдался. Диалог окончен скандалом, ты требуешь ЛНП.
+   - "continue": проводник вежлив, но пока не убедил тебя (например, просто попросил убрать вейп, но не объяснил почему это опасно). Ты споришь или задаешь уточняющий вопрос.
 
-Выведи ответ строго в JSON по указанной схеме.
+Выведи ответ строго в JSON по схеме.
 """
 
         messages = [{"role": "system", "content": system_prompt}]
@@ -196,16 +203,22 @@ class PolzaAIService:
                     "schema": {
                         "type": "object",
                         "properties": {
-                            "is_passed": {"type": "boolean", "description": "Проблема решена?"},
+                            "dialog_status": {
+                                "type": "string",
+                                "enum": ["resolved", "failed", "continue"],
+                                "description": "Статус диалога"
+                            },
                             "loyalty_delta": {"type": "integer", "description": "Очки сервиса (-50..50)"},
                             "safety_delta": {"type": "integer", "description": "Очки безопасности (-50..50)"},
                             "mood": {"type": "string", "enum": sprites, "description": "Новый спрайт пассажира"},
                             "passenger_reply": {"type": "string", "description": "Твоя прямая речь"},
                             "feedback_title": {"type": "string", "description": "Заголовок разбора для инструктора"},
                             "feedback_text": {"type": "string", "description": "Текст разбора для инструктора"},
-                            "trigger_butterfly": {"type": "boolean", "description": "Требуется ли вызвать врача? (Эффект бабочки)"}
+                            "trigger_butterfly": {"type": "boolean",
+                                                  "description": "Требуется ли вызвать врача? (Эффект бабочки)"}
                         },
-                        "required": ["is_passed", "loyalty_delta", "safety_delta", "mood", "passenger_reply", "feedback_title", "feedback_text"]
+                        "required": ["dialog_status", "loyalty_delta", "safety_delta", "mood", "passenger_reply",
+                                     "feedback_title", "feedback_text"]
                     },
                     "strict": False
                 }
@@ -223,7 +236,7 @@ class PolzaAIService:
                     content = resp.json()["choices"][0]["message"]["content"]
                     if content.startswith("```json"):
                         content = content.replace("```json", "").replace("```", "").strip()
-                    
+
                     data = json.loads(content)
                     data["role_model_steps_covered"] = ["Эмпатия", "Правило", "Решение"]
                     if data.get("trigger_butterfly"):

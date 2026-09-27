@@ -293,6 +293,15 @@ export class TrainWorldStore {
     this.timeline.reset();
     physicsState.isPaused = true;
     trainAudio.stopAmbient(true);
+    trainAudio.stopEventAmbient(); // <--- Останавливаем звук инцидента (вейп, плач и т.д.)
+
+    // Останавливаем все зацикленные фоновые звуки
+    const loops = (trainAudio as any).ambientLoops;
+    if (loops) {
+      for (const filename of Array.from(loops.keys())) {
+        trainAudio.stopAmbientLoop(filename as string);
+      }
+    }
   }
 
   public showToast(title: string, subtitle: string, durationMs = 3500) {

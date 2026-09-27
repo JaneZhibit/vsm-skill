@@ -2,28 +2,46 @@ import random
 from typing import Dict, Any, List, Optional
 from app.schemas.passenger import ActiveIncidentSchema, ScenarioStepSchema, SeatInfo
 from app.services.scenarios import SCENARIOS_DB, get_frontend_incident_data
+from app.services.passenger_generator import generate_passenger
+
 
 def execute_live_scenario(scenario: dict, seats: List[SeatInfo]) -> None:
     occupied = [s for s in seats if s.is_occupied and s.passenger]
     if not occupied:
         return
-    
+
     target_arch = scenario.get("target_archetype", "any")
-    valid_seats = occupied if target_arch == "any" else [s for s in occupied if s.passenger.archetype_id == target_arch]
-    
+    valid_seats = [s for s in occupied if s.passenger.archetype_id == target_arch] if target_arch != "any" else occupied
+
     if not valid_seats:
+        # Если нужного типажа нет — берем любого и ЖЕСТКО превращаем в нужного!
         valid_seats = occupied
-        
-    free_seats = [s for s in valid_seats if not s.active_incident]
-    seat = random.choice(free_seats if free_seats else valid_seats)
-    
+        free_seats = [s for s in valid_seats if not s.active_incident]
+        seat = random.choice(free_seats if free_seats else valid_seats)
+
+        if target_arch != "any":
+            seat.passenger = generate_passenger(
+                archetype=target_arch,
+                destination=seat.passenger.destination,
+                ticket_status=seat.passenger.ticket_status,
+                is_boarding=False  # Важно, чтобы генератор не сбрасывал стейт
+            )
+    else:
+        free_seats = [s for s in valid_seats if not s.active_incident]
+        seat = random.choice(free_seats if free_seats else valid_seats)
+
     allowed = scenario.get("allowed_moods", [])
     new_state = scenario.get("passenger_state") or (allowed[0] if allowed else "annoyed")
+
+    # Принудительно устанавливаем новое лицо (например, vaping_calm)
     seat.passenger.state = new_state
-    seat.passenger.sprite_url = f"/assets/{seat.passenger.archetype_id}/{new_state}.png"
-    
+    sprite_mood = "neutral" if new_state == "calm" else new_state
+    seat.passenger.sprite_url = f"/assets/{seat.passenger.archetype_id}/{sprite_mood}.png"
+
     is_passive = scenario.get("is_passive", False)
     phase_str = "passive" if is_passive else "urgent"
+
+    start_phrase = scenario.get("initial_phrase") or scenario.get("steps", {}).get("step_1", {}).get("prompt") or scenario.get("llm_system_prompt", "")
 
     seat.active_incident = ActiveIncidentSchema(
         incident_id=scenario["incident_id"],
@@ -33,17 +51,19 @@ def execute_live_scenario(scenario: dict, seats: List[SeatInfo]) -> None:
         ambient_audio=scenario.get("ambient_audio"),
         steps={
             "step_1": ScenarioStepSchema(
-                prompt=scenario.get("llm_system_prompt", ""),
+                prompt=start_phrase,
                 expected_rule=scenario.get("expected_rule", ""),
                 phase=phase_str,
+                timer_seconds=30,
                 options=[]
             )
         }
     )
 
+
 def execute_builtin_trigger(
-    trigger: dict, current_time: float, seats: List[SeatInfo], 
-    crying_seat_id: Optional[str]
+        trigger: dict, current_time: float, seats: List[SeatInfo],
+        crying_seat_id: Optional[str]
 ) -> tuple[Optional[float], Optional[str]]:
     """Returns (new_crying_start_time, new_crying_seat_id) if modified."""
     inc_id = trigger.get("incident_id")
@@ -59,14 +79,16 @@ def execute_builtin_trigger(
 
     target_seat = None
     if inc_id == "live_crying_child":
-        target_seat = next((s for s in candidates if s.passenger.archetype_id == "female_young"), random.choice(candidates))
+        target_seat = next((s for s in candidates if s.passenger.archetype_id == "female_young"),
+                           random.choice(candidates))
     elif inc_id == "live_drunk":
-        target_seat = next((s for s in candidates if s.passenger.archetype_id == "male_young"), random.choice(candidates))
+        target_seat = next((s for s in candidates if s.passenger.archetype_id == "male_young"),
+                           random.choice(candidates))
     elif inc_id == "live_neighbor_complaint":
         crying_seat = next((s for s in seats if s.seat_id == crying_seat_id), None)
         if crying_seat:
             neighbor_candidates = [
-                s for s in occupied 
+                s for s in occupied
                 if s.seat_id != crying_seat_id and not s.active_incident and abs(s.row - crying_seat.row) <= 1
             ]
             target_seat = random.choice(neighbor_candidates) if neighbor_candidates else random.choice(candidates)

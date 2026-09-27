@@ -33,7 +33,7 @@
         isCabinInit = true;
         cabinCtx = cabinCanvas.getContext('2d', { willReadFrequently: true });
         const img = new Image();
-        img.src = '/assets/cabin_dirty.png'; // Ваш грязный слой салона (можно поменять на JPG, если нужно)
+        img.src = '/assets/cabin_dirty.jpg'; // Ваш грязный слой салона (можно поменять на JPG, если нужно)
         img.onload = () => {
           if (cabinCanvas && cabinCtx) {
             cabinCanvas.width = img.naturalWidth || 1671;
@@ -46,7 +46,7 @@
         isToiletInit = true;
         toiletCtx = toiletCanvas.getContext('2d', { willReadFrequently: true });
         const img2 = new Image();
-        img2.src = '/assets/cabin-toilet-dirty.jpg'; // Новый грязный слой санузла
+        img2.src = '/assets/toilet_bad.jpg'; // Новый грязный слой санузла
         img2.onload = () => {
           if (toiletCanvas && toiletCtx) {
             toiletCanvas.width = img2.naturalWidth || 1671;
@@ -181,7 +181,7 @@
     <!-- ЗОНА 1: САЛОН -->
     <div class="absolute inset-0" style="display: {activeZone === 'cabin' ? 'block' : 'none'}">
       <!-- Чистый фон салона из основной сцены -->
-      <img src="/assets/cabin.png" alt="Чистый салон" class="w-full h-full object-cover pointer-events-none" />
+      <img src="/assets/cabin.jpg" alt="Чистый салон" class="w-full h-full object-cover pointer-events-none" />
       <canvas
         bind:this={cabinCanvas}
         class="absolute inset-0 w-full h-full touch-none cursor-crosshair"
@@ -198,7 +198,7 @@
     <!-- ЗОНА 2: САНУЗЕЛ -->
     <div class="absolute inset-0" style="display: {activeZone === 'toilet' ? 'block' : 'none'}">
       <!-- Чистый фон санузла -->
-      <img src="/assets/cabin-toilet-clean.jpg" alt="Чистый санузел" class="w-full h-full object-cover pointer-events-none" />
+      <img src="/assets/toilet_good.jpg" alt="Чистый санузел" class="w-full h-full object-cover pointer-events-none" />
       <canvas
         bind:this={toiletCanvas}
         class="absolute inset-0 w-full h-full touch-none cursor-crosshair"
