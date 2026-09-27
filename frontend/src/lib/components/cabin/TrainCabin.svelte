@@ -1,27 +1,31 @@
 <script lang="ts">
   import { fade, fly } from 'svelte/transition';
 
-  // Утилиты и сторы на два уровня выше
+  // Утилиты и сторы
   import { trainWorld } from '../../stores/trainWorld.svelte';
   import { cabinState } from '../../stores/cabinState.svelte';
   import { physicsState } from '../../stores/trainPhysics.svelte';
   import { conductorState } from '../../stores/conductorState.svelte';
+  import { trainAudio } from '../../stores/trainAudio.svelte';
+  import { authStore } from '../../stores/authStore.svelte';
   import { playCallBell, playClickSound, playSuccessSound } from '../../utils/audio';
 
-  // Компоненты на один уровень выше
+  // Компоненты
   import CeilingDisplay from '../CeilingDisplay.svelte';
   import ConductorDialogue from '../ConductorDialogue.svelte';
   import SeatMapModal from '../SeatMapModal.svelte';
   import ShiftDebriefModal from '../ShiftDebriefModal.svelte';
   import RadioTool from '../RadioTool.svelte';
-
-  // Компоненты в этой же папке
   import CleaningMiniGame from './CleaningMiniGame.svelte';
   import PreTripMiniGame from './PreTripMiniGame.svelte';
 
   let isSeatMapOpen = $state<boolean>(false);
   let isResetConfirmOpen = $state<boolean>(false);
   let isDebriefOpen = $state<boolean>(false);
+
+  // Новые состояния для мобильного UI
+  let isSettingsOpen = $state<boolean>(false);
+  let isInfoCollapsed = $state<boolean>(false); // Свернута ли нижняя панель времени
 
   let selectedSeat = $derived(cabinState.selectedSeat);
   let callingSeat = $derived(
@@ -72,31 +76,20 @@
     }
   }
 
-  function handlePrevSeat() {
-    playClickSound();
-    cabinState.prevOccupiedSeat();
-    if (cabinState.selectedSeat) {
-      cabinState.inspectSeat(cabinState.selectedSeat.id);
-    }
-  }
-
-  function handleNextSeat() {
-    playClickSound();
-    cabinState.nextOccupiedSeat();
-    if (cabinState.selectedSeat) {
-      cabinState.inspectSeat(cabinState.selectedSeat.id);
-    }
-  }
-
-  function handleOpenSeatMap() {
-    playClickSound();
-    isSeatMapOpen = true;
-  }
+  function handlePrevSeat() { playClickSound(); cabinState.prevOccupiedSeat(); if (cabinState.selectedSeat) cabinState.inspectSeat(cabinState.selectedSeat.id); }
+  function handleNextSeat() { playClickSound(); cabinState.nextOccupiedSeat(); if (cabinState.selectedSeat) cabinState.inspectSeat(cabinState.selectedSeat.id); }
+  function handleOpenSeatMap() { playClickSound(); isSeatMapOpen = true; }
 
   async function handleConfirmNewTrip() {
     playSuccessSound();
     isResetConfirmOpen = false;
     await trainWorld.startNewTrip();
+  }
+
+  function handleExitToMenu() {
+    playClickSound();
+    trainWorld.abortTrip();
+    authStore.setRoute('trips');
   }
 
   let scrollAreaEl = $state<HTMLElement | null>(null);
@@ -110,49 +103,31 @@
 
     if (cabinState.currentView === 'seat') {
       const letter = selectedSeat?.id.slice(-1);
-      if (letter === 'A' || letter === 'B') {
-        targetLeft = maxScroll * 0.22;
-      } else if (letter === 'C' || letter === 'D') {
-        targetLeft = maxScroll * 0.78;
-      } else {
-        targetLeft = maxScroll * 0.5;
-      }
+      if (letter === 'A' || letter === 'B') targetLeft = maxScroll * 0.22;
+      else if (letter === 'C' || letter === 'D') targetLeft = maxScroll * 0.78;
     } else if (cabinState.currentView === 'aisle' && callingSeat) {
       const letter = callingSeat.id.slice(-1);
-      if (letter === 'A' || letter === 'B') {
-        targetLeft = maxScroll * 0.25;
-      } else if (letter === 'C' || letter === 'D') {
-        targetLeft = maxScroll * 0.75;
-      }
+      if (letter === 'A' || letter === 'B') targetLeft = maxScroll * 0.25;
+      else if (letter === 'C' || letter === 'D') targetLeft = maxScroll * 0.75;
     }
 
-    scrollAreaEl.scrollTo({
-      left: targetLeft,
-      behavior: smooth ? 'smooth' : 'auto'
-    });
+    scrollAreaEl.scrollTo({ left: targetLeft, behavior: smooth ? 'smooth' : 'auto' });
   }
 
   $effect(() => {
     const view = cabinState.currentView;
     const seatId = selectedSeat?.id;
     const callId = callingSeat?.id;
-
-    const timer = setTimeout(() => {
-      centerScroll(true);
-    }, 120);
-
+    const timer = setTimeout(() => centerScroll(true), 120);
     return () => clearTimeout(timer);
   });
 
-  function handleWindowResize() {
-    centerScroll(false);
-  }
+  function handleWindowResize() { centerScroll(false); }
 </script>
 
 <svelte:window onresize={handleWindowResize} />
 
 <div class="cabin-viewport">
-
   <RadioTool />
 
   {#if trainWorld.stationToast}
@@ -164,57 +139,50 @@
     </div>
   {/if}
 
+  <!-- ВЕРХНИЙ HUD -->
   <div class="hud-top-bar">
     {#if cabinState.currentView === 'aisle'}
       <div class="aisle-phase-banner">
         {#if conductorState.shiftPhase === 'initial_round'}
           <div class="phase-banner-content phase-round">
-            <span class="phase-text">
-              📋 <strong>Приемка вагона (13:50)</strong> • Проведите осмотр оборудования перед рейсом.
-            </span>
+            <span class="phase-text">📋 <strong>Приемка (13:50)</strong></span>
           </div>
         {:else if conductorState.shiftPhase === 'cruise'}
           <div class="phase-banner-content phase-cruise">
             <span class="phase-pulse-dot"></span>
-            <span class="phase-text">
-              ⚡ <strong>В пути ({Math.round(physicsState.speed)} км/ч)</strong>
-            </span>
+            <span class="phase-text">⚡ <strong>{Math.round(physicsState.speed)} км/ч</strong></span>
           </div>
         {:else if conductorState.shiftPhase === 'station_warning' || conductorState.shiftPhase === 'tver_warning'}
           {@const exiting = cabinState.getNextStationExitingPassengers(physicsState.nextStation?.label || '')}
-          {@const remindedCount = exiting.filter(s => s.isStationExitReminded || s.isTverReminded).length}
           <div class="phase-banner-content phase-warning">
-            <span class="phase-text">
-              ⚠️ <strong>{physicsState.nextStation?.label || 'ст. Тверь'} через 10 мин</strong> • На выход: {exiting.length} пасс. ({remindedCount}/{exiting.length})
-            </span>
+            <span class="phase-text">⚠️ <strong>Прибытие (10м)</strong> • Выход: {exiting.length} чел.</span>
           </div>
         {:else}
           <div class="phase-banner-content phase-arrival">
-            <span class="phase-text">
-              🏁 <strong>{physicsState.currentKm >= 679 ? 'Санкт-Петербург Главный' : 'Стоянка на станции'}</strong> • {physicsState.currentKm >= 679 ? 'Рейс № 754 успешно завершен' : 'Посадка/высадка'}
-            </span>
+            <span class="phase-text">🏁 <strong>Стоянка</strong></span>
           </div>
         {/if}
       </div>
 
       <div class="top-actions-cluster">
-        <button onclick={handleOpenSeatMap} class="seat-map-trigger-btn" title="Открыть интерактивную схему мест вагона">
+        <button onclick={handleOpenSeatMap} class="seat-map-trigger-btn" title="Схема вагона">
           <span class="trigger-icon">📋</span>
-          <span class="trigger-text">Схема ({cabinState.occupiedSeatsCount}/48)</span>
+          <span class="trigger-text hidden sm:inline">Схема ({cabinState.occupiedSeatsCount}/48)</span>
           {#if cabinState.alertSeatsCount > 0}
-            <span class="trigger-alert-badge">
-              <span class="trigger-alert-ping"></span>
-              {cabinState.alertSeatsCount}
-            </span>
+            <span class="trigger-alert-badge"><span class="trigger-alert-ping"></span>{cabinState.alertSeatsCount}</span>
           {/if}
+        </button>
+        <!-- НОВАЯ КНОПКА НАСТРОЕК/МЕНЮ -->
+        <button onclick={() => { playClickSound(); isSettingsOpen = true; }} class="seat-map-trigger-btn !px-2.5" title="Меню">
+          <span class="trigger-icon">⚙️</span>
         </button>
       </div>
     {:else}
       <div class="seat-top-bar">
         <div class="seat-stepper-mini">
-          <button onclick={handlePrevSeat} class="stepper-mini-btn" title="Предыдущий занятый пассажир">◀ Пред</button>
-          <button onclick={handleOpenSeatMap} class="stepper-mini-seat" title="Открыть карту мест">💺 Место {selectedSeat?.id || '—'}</button>
-          <button onclick={handleNextSeat} class="stepper-mini-btn" title="Следующий занятый пассажир">След ▶</button>
+          <button onclick={handlePrevSeat} class="stepper-mini-btn">◀ Пред</button>
+          <button onclick={handleOpenSeatMap} class="stepper-mini-seat">💺 Место {selectedSeat?.id || '—'}</button>
+          <button onclick={handleNextSeat} class="stepper-mini-btn">След ▶</button>
         </div>
       </div>
     {/if}
@@ -222,59 +190,32 @@
 
   <div class="scene-scroll-area hide-scrollbar" bind:this={scrollAreaEl}>
     {#if cabinState.currentView === 'aisle'}
-      <div
-        class="scene-container aisle-scene"
-        class:high-speed-shake={physicsState.speed > 250 && !physicsState.isPaused}
-        class:ambient-sway={physicsState.speed > 5 && !physicsState.isPaused}
-      >
-        <div class="window-viewport left-viewport">
-          <div class="parallax-layer sky-layer" class:is-moving={physicsState.speed > 5 && !physicsState.isPaused}></div>
-          <div class="parallax-layer ground-layer" class:is-moving={physicsState.speed > 5 && !physicsState.isPaused}></div>
-        </div>
-
-        <div class="window-viewport right-viewport">
-          <div class="parallax-layer sky-layer" class:is-moving={physicsState.speed > 5 && !physicsState.isPaused}></div>
-          <div class="parallax-layer ground-layer" class:is-moving={physicsState.speed > 5 && !physicsState.isPaused}></div>
-        </div>
-
-        <div
-          class="station-platform-layer"
-          class:platform-visible={physicsState.speed < 5 && physicsState.movementStatus.includes('Стоянка')}
-        ></div>
+      <div class="scene-container aisle-scene" class:high-speed-shake={physicsState.speed > 250 && !physicsState.isPaused} class:ambient-sway={physicsState.speed > 5 && !physicsState.isPaused}>
+        <div class="window-viewport left-viewport"><div class="parallax-layer sky-layer" class:is-moving={physicsState.speed > 5 && !physicsState.isPaused}></div><div class="parallax-layer ground-layer" class:is-moving={physicsState.speed > 5 && !physicsState.isPaused}></div></div>
+        <div class="window-viewport right-viewport"><div class="parallax-layer sky-layer" class:is-moving={physicsState.speed > 5 && !physicsState.isPaused}></div><div class="parallax-layer ground-layer" class:is-moving={physicsState.speed > 5 && !physicsState.isPaused}></div></div>
+        <div class="station-platform-layer" class:platform-visible={physicsState.speed < 5 && physicsState.movementStatus.includes('Стоянка')}></div>
 
         <img src={cabinImageSrc} alt="Вагон" class="base-image cabin-overlay" />
-
         <CeilingDisplay />
 
-        <!-- === ИГРА: ПРИЕМКА ВАГОНА (ЧЕК-ЛИСТ) === -->
         {#if conductorState.shiftPhase === 'initial_round' && !trainWorld.isPreTripDone && !trainWorld.preTripNeedsRadio}
           <PreTripMiniGame />
         {/if}
-
-        <!-- === ИГРА: УБОРКА ВАГОНА === -->
         <CleaningMiniGame {isTripFinished} />
 
         {#if callingSeat}
           {@const pos = getSeatCoords(callingSeat.id)}
           <div class="absolute pointer-events-none z-20 w-32 h-32 rounded-full -translate-x-1/2 -translate-y-1/2 bg-rose-600/30 blur-2xl animate-pulse" style="top: {pos.top}; left: {pos.left};"></div>
-          <button onclick={() => handleCallClick(callingSeat?.id)} class="aisle-call-badge" style="top: {pos.top}; left: {pos.left}; transform: translate(-50%, -50%) scale({pos.scale});" title="Подойти к месту {callingSeat.id}">
-            <span class="call-ping"></span>🛎️ Место {callingSeat.id} • Ожидание: {Math.ceil(trainWorld.reactionTimeLeft)} сек ➔
+          <button onclick={() => handleCallClick(callingSeat?.id)} class="aisle-call-badge" style="top: {pos.top}; left: {pos.left}; transform: translate(-50%, -50%) scale({pos.scale});">
+            <span class="call-ping"></span>🛎️ Место {callingSeat.id} • {Math.ceil(trainWorld.reactionTimeLeft)} с ➔
           </button>
         {/if}
 
         {#each cabinState.seats.filter(s => s.isOccupied && ((s.activeIncident && typeof s.activeIncident === 'object' && s.activeIncident.phase === 'passive') || s.condition === 'drunk' || s.condition === 'sleeping')) as passiveSeat}
           {#if !callingSeat || callingSeat.id !== passiveSeat.id}
             {@const ppos = getSeatCoords(passiveSeat.id)}
-            <button onclick={() => handleCallClick(passiveSeat.id)} class="aisle-call-badge !bg-stone-900/90 !border-amber-500/60 hover:!bg-stone-800 text-amber-200" style="top: {ppos.top}; left: {ppos.left}; transform: translate(-50%, -50%) scale({ppos.scale * 0.85});" title="Подойти к месту {passiveSeat.id}">
-              <span>
-                {#if passiveSeat.activeIncident && typeof passiveSeat.activeIncident === 'object' && passiveSeat.activeIncident.phase === 'passive'}
-                  👁️ Место {passiveSeat.id}
-                {:else if passiveSeat.condition === 'drunk'}
-                  🍺 Место {passiveSeat.id}
-                {:else}
-                  💤 Место {passiveSeat.id}
-                {/if}
-              </span>
+            <button onclick={() => handleCallClick(passiveSeat.id)} class="aisle-call-badge !bg-stone-900/90 !border-amber-500/60 hover:!bg-stone-800 text-amber-200" style="top: {ppos.top}; left: {ppos.left}; transform: translate(-50%, -50%) scale({ppos.scale * 0.85});">
+              <span>{#if passiveSeat.activeIncident && typeof passiveSeat.activeIncident === 'object' && passiveSeat.activeIncident.phase === 'passive'}👁️ {passiveSeat.id}{:else if passiveSeat.condition === 'drunk'}🍺 {passiveSeat.id}{:else}💤 {passiveSeat.id}{/if}</span>
             </button>
           {/if}
         {/each}
@@ -284,8 +225,7 @@
         <img src="/assets/seat_bg.png" alt="Салон" class="base-image" />
         {#if selectedSeat?.isOccupied && selectedSeat?.passenger}
           {@const p = selectedSeat.passenger}
-          {@const rawSprite = cabinState.currentPassengerSprite || p.sprite_url || ''}
-          {@const cleanSprite = rawSprite.replace('/assets/passengers/', '/assets/')}
+          {@const cleanSprite = (cabinState.currentPassengerSprite || p.sprite_url || '').replace('/assets/passengers/', '/assets/')}
           <img src={cleanSprite} alt={p.full_name} class="passenger-overlay" onerror={(e) => { const target = e.currentTarget as HTMLImageElement; target.src = `/assets/${p.archetype_id}/neutral.png`; }} />
         {:else if !isCabinEmpty && cabinState.passengerMood !== 'empty'}
           <img src={cabinState.passengerMood === 'calm' ? '/assets/passenger_calm.png' : '/assets/passenger_annoyed.png'} alt="Пассажир" class="passenger-overlay" />
@@ -294,65 +234,72 @@
     {/if}
   </div>
 
+  <!-- НИЖНЯЯ ПАНЕЛЬ -->
   {#if cabinState.currentView === 'aisle'}
-    <!-- Проверяем, открыта ли прямо сейчас мини-игра приемки -->
     {@const isPreTripGameActive = conductorState.shiftPhase === 'initial_round' && !trainWorld.isPreTripDone && !trainWorld.preTripNeedsRadio}
 
-    <!-- Скрываем нижнюю панель полностью, если мы заняты заполнением чек-листа -->
     {#if !isPreTripGameActive}
       <div class="bottom-ui-panel">
-        <!-- Кнопка поверх всего -->
+        <!-- Основная кнопка действия -->
         <div class="pointer-events-auto w-full flex justify-center z-[50] relative">
           {#if isTripFinished}
-            <button onclick={() => { isDebriefOpen = true; }} disabled={!trainWorld.isPostTripDone} class="px-8 py-3 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-400 hover:from-emerald-500 text-white font-extrabold rounded-full shadow-[0_0_25px_rgba(16,185,129,0.5)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer border border-emerald-300 text-sm tracking-wide disabled:opacity-50 disabled:grayscale disabled:hover:scale-100 disabled:animate-none {trainWorld.isPostTripDone ? 'animate-bounce' : ''}">
-              <span>{trainWorld.isPostTripDone ? '🏁 Завершить смену и подвести итоги ➔' : '🧹 Проведите осмотр и уборку вагона...'}</span>
+            <button onclick={() => { isDebriefOpen = true; }} disabled={!trainWorld.isPostTripDone} class="main-action-btn from-emerald-600 to-teal-500 border-emerald-400 {trainWorld.isPostTripDone ? 'animate-bounce' : 'grayscale opacity-80'}">
+              <span>{trainWorld.isPostTripDone ? '🏁 Итоги смены ➔' : '🧹 Осмотр вагона...'}</span>
             </button>
           {:else if cabinState.alertSeatsCount > 0}
             {@const incSeat = cabinState.seats.find((s) => s.activeIncident != null)}
-            <button onclick={() => handleCallClick(incSeat?.id)} class="px-6 py-2.5 bg-gradient-to-r from-rose-600 to-amber-500 text-white font-bold rounded-full shadow-[0_0_20px_rgba(244,63,94,0.6)] animate-pulse flex items-center gap-2 cursor-pointer border border-rose-300">
-              <span>🚨 Место {incSeat?.id}: требуется решение проводника ➔</span>
+            <button onclick={() => handleCallClick(incSeat?.id)} class="main-action-btn from-rose-600 to-amber-500 border-rose-400 animate-pulse">
+              <span>🚨 Место {incSeat?.id}: Решить ➔</span>
             </button>
           {:else if conductorState.shiftPhase === 'initial_round'}
             {#if trainWorld.preTripNeedsRadio}
-              <button disabled class="px-6 py-2.5 bg-rose-900 text-rose-300 font-bold rounded-full shadow-lg border border-rose-500 opacity-80 cursor-not-allowed">
-                <span>📻 Доложите о неисправностях по рации...</span>
+              <button disabled class="main-action-btn bg-rose-900 opacity-90 border-rose-500 cursor-not-allowed">
+                <span>📻 Доложите по рации...</span>
               </button>
             {:else}
-              <button onclick={() => { playSuccessSound(); trainWorld.startCruisePhase(); }} disabled={!trainWorld.isPreTripDone} class="px-6 py-2.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 font-bold rounded-full shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:grayscale disabled:hover:scale-100">
-                <span>{trainWorld.isPreTripDone ? '🚪 Начать посадку и отправиться (14:00) ➔' : '🔍 Проведите приемку вагона перед рейсом...'}</span>
+              <button onclick={() => { playSuccessSound(); trainWorld.startCruisePhase(); }} disabled={!trainWorld.isPreTripDone} class="main-action-btn from-amber-600 to-yellow-500 text-stone-950 border-amber-400 {trainWorld.isPreTripDone ? '' : 'grayscale opacity-80'}">
+                <span>{trainWorld.isPreTripDone ? '🚪 Начать посадку (14:00) ➔' : '🔍 Приемка вагона...'}</span>
               </button>
             {/if}
           {:else if conductorState.shiftPhase === 'cruise'}
-            <button onclick={() => { playClickSound(); trainWorld.skipToNextEvent(); }} class="px-6 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-500 hover:from-cyan-500 hover:to-teal-400 text-white font-bold rounded-full shadow-[0_4px_20px_rgba(6,182,212,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer">
-              <span>⏩ Промотать до события ➔</span>
+            <button onclick={() => { playClickSound(); trainWorld.skipToNextEvent(); }} class="main-action-btn from-cyan-600 to-teal-500 border-cyan-400">
+              <span>⏩ Промотать событие ➔</span>
             </button>
           {:else if conductorState.shiftPhase === 'station_warning' || conductorState.shiftPhase === 'tver_warning'}
-            <button onclick={() => { playClickSound(); trainWorld.skipToNextEvent(); }} class="px-6 py-2.5 bg-gradient-to-r from-rose-600 to-orange-500 hover:from-rose-500 hover:to-orange-400 text-white font-bold rounded-full shadow-[0_4px_20px_rgba(225,29,72,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer">
-              <span>🚉 Перейти к прибытию ➔</span>
+            <button onclick={() => { playClickSound(); trainWorld.skipToNextEvent(); }} class="main-action-btn from-rose-600 to-orange-500 border-rose-400">
+              <span>🚉 К прибытию ➔</span>
             </button>
           {:else if conductorState.shiftPhase === 'arrival'}
-            <button onclick={() => { playSuccessSound(); trainWorld.startCruisePhase(); }} class="px-6 py-2.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 font-bold rounded-full shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer">
+            <button onclick={() => { playSuccessSound(); trainWorld.startCruisePhase(); }} class="main-action-btn from-amber-600 to-yellow-500 text-stone-950 border-amber-400">
               <span>⏩ Отправление дальше ➔</span>
             </button>
           {/if}
         </div>
 
-        <!-- СКРЫВАЕМ таймлайн (шкалу), если мы уже на станции прибытия/уборки -->
+        <!-- Сворачиваемая инфо-панель -->
         {#if !isTripFinished && conductorState.shiftPhase !== 'arrival'}
-        <div class="pointer-events-auto w-full bg-[#141210]/95 backdrop-blur-md border border-[#3d3831] rounded-2xl p-3 sm:p-4 shadow-2xl flex flex-col gap-2 relative z-10">
-          <div class="flex justify-between items-center text-[11px] font-mono text-[#a39e95] uppercase font-semibold">
-            <span class="text-[#f5f3ef] bg-[#282420] px-2 py-0.5 rounded border border-[#3d3831]">🕒 {physicsState.formattedTime}</span>
-            <div class="text-center flex flex-col items-center">
-              <span class="text-amber-400 text-xs">След: {physicsState.nextStation?.label || 'Санкт-Петербург Главный'}</span>
-              <span class="text-[10px] opacity-70">Прибытие: {physicsState.nextStation?.plannedTime || '16:15'}</span>
-            </div>
-            <span>С-Петербург (16:15)</span>
+          <div class="pointer-events-auto w-full max-w-sm mx-auto flex flex-col items-center">
+            <!-- Кнопка свернуть/развернуть -->
+            <button onclick={() => {playClickSound(); isInfoCollapsed = !isInfoCollapsed;}} class="bg-[#141210]/95 border border-b-0 border-[#3d3831] rounded-t-xl px-4 py-1 flex items-center justify-center cursor-pointer hover:bg-[#1a1816]">
+              <span class="text-[10px] text-stone-400 font-bold uppercase tracking-widest">{isInfoCollapsed ? '▲ Маршрут' : '▼ Скрыть'}</span>
+            </button>
+
+            {#if !isInfoCollapsed}
+              <div class="w-full bg-[#141210]/95 backdrop-blur-md border border-[#3d3831] rounded-xl rounded-t-none p-2 sm:p-3 shadow-2xl flex flex-col gap-2 relative z-10" transition:slide={{duration: 200}}>
+                <div class="flex justify-between items-center text-[10px] font-mono text-[#a39e95] uppercase font-semibold">
+                  <span class="text-amber-400 bg-[#282420] px-1.5 py-0.5 rounded border border-[#3d3831]">🕒 {physicsState.formattedTime}</span>
+                  <div class="text-center flex flex-col items-center leading-tight">
+                    <span class="text-white">След: {physicsState.nextStation?.label || 'С-Петербург'}</span>
+                    <span class="opacity-60 text-[9px]">{physicsState.nextStation?.plannedTime || '16:15'}</span>
+                  </div>
+                </div>
+                <div class="relative w-full h-1.5 bg-[#2d2924] rounded-full mt-0.5">
+                  <div class="absolute top-0 left-0 h-full bg-amber-500 rounded-full transition-all duration-1000 ease-out" style="width: {physicsState.progressPercent}%"></div>
+                  <div class="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-white border border-amber-500 rounded-full shadow-[0_0_8px_rgba(245,158,11,0.8)] transition-all duration-1000 ease-out" style="left: {physicsState.progressPercent}%"></div>
+                </div>
+              </div>
+            {/if}
           </div>
-          <div class="relative w-full h-1.5 bg-[#2d2924] rounded-full mt-1">
-            <div class="absolute top-0 left-0 h-full bg-amber-500 rounded-full transition-all duration-1000 ease-out" style="width: {physicsState.progressPercent}%"></div>
-            <div class="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white border-2 border-amber-500 rounded-full shadow-[0_0_10px_rgba(245,158,11,0.8)] transition-all duration-1000 ease-out" style="left: {physicsState.progressPercent}%"></div>
-          </div>
-        </div>
         {/if}
       </div>
     {/if}
@@ -362,21 +309,44 @@
     </div>
   {/if}
 
-  <SeatMapModal isOpen={isSeatMapOpen} onClose={() => { isSeatMapOpen = false; }} />
-  <ShiftDebriefModal isOpen={isDebriefOpen} onClose={() => { isDebriefOpen = false; }} />
-
-  {#if isResetConfirmOpen}
-    <div class="confirm-modal-backdrop" role="presentation" onclick={() => (isResetConfirmOpen = false)} onkeydown={(e) => { if (e.key === 'Escape') isResetConfirmOpen = false; }}>
-      <div class="confirm-modal-box" role="dialog" aria-modal="true" aria-labelledby="confirm-trip-title" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
-        <div id="confirm-trip-title" class="confirm-title">🔄 Начать новую поездку?</div>
-        <div class="confirm-desc">Текущий рейс поезда «Белый кречет» будет перезапущен.</div>
-        <div class="confirm-actions">
-          <button class="confirm-btn-cancel" onclick={() => (isResetConfirmOpen = false)}>Отмена</button>
-          <button class="confirm-btn-ok" onclick={handleConfirmNewTrip}>Начать заново</button>
+  <!-- МЕНЮ НАСТРОЕК И ПАУЗЫ -->
+  {#if isSettingsOpen}
+    <div class="fixed inset-0 z-[150] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" transition:fade={{duration: 150}}>
+      <div class="w-full max-w-sm bg-[#1a1816] border border-[#3d3831] rounded-2xl p-5 shadow-2xl flex flex-col gap-4" transition:fly={{y: 20, duration: 200}}>
+        <div class="text-center pb-3 border-b border-[#2d2924]">
+          <h2 class="text-lg font-bold text-white mb-1">Меню симуляции</h2>
+          <div class="text-xs font-mono text-amber-400">Рейс № 754 • {conductorState.conductorProfile.role}</div>
         </div>
+
+        <!-- Рейтинг текущей сессии (перенесен из хедера) -->
+        <div class="flex justify-between items-center bg-[#141210] p-3 rounded-xl border border-[#2d2924]">
+          <span class="text-xs text-stone-400 uppercase font-bold">Оценка ЗУН:</span>
+          <div class="flex gap-3 text-xs font-mono font-bold">
+            <span class="text-amber-400">🤝 {conductorState.loyaltyScore}</span>
+            <span class="text-emerald-400">🛡️ {conductorState.safetyScore}</span>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-2.5">
+          <button onclick={() => { playClickSound(); trainAudio.toggleAudio(); }} class="w-full p-3 rounded-xl bg-[#282420] hover:bg-[#342f2a] border border-[#3d3831] text-sm font-bold text-white transition-colors cursor-pointer flex justify-between items-center">
+            <span>Звуки поезда</span>
+            <span>{trainAudio.isAudioMuted ? '🔇 Выкл' : '🔊 Вкл'}</span>
+          </button>
+
+          <button onclick={handleExitToMenu} class="w-full p-3 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-sm font-bold text-rose-400 transition-colors cursor-pointer text-center">
+            🚪 Выйти в меню рейсов
+          </button>
+        </div>
+
+        <button onclick={() => { playClickSound(); isSettingsOpen = false; }} class="w-full mt-2 p-3.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 text-sm font-bold shadow-lg shadow-amber-500/20 cursor-pointer">
+          ▶ Продолжить
+        </button>
       </div>
     </div>
   {/if}
+
+  <SeatMapModal isOpen={isSeatMapOpen} onClose={() => { isSeatMapOpen = false; }} />
+  <ShiftDebriefModal isOpen={isDebriefOpen} onClose={() => { isDebriefOpen = false; }} />
 
   {#if trainWorld.isPhaseTransitioning}
     <div transition:fade={{ duration: 600 }} class="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#050505] text-amber-400">
@@ -388,18 +358,23 @@
 </div>
 
 <style>
+  /* Основные стили остались прежними, добавлены классы для новых элементов */
   .cabin-viewport { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden; background-color: #0f0e0d; }
   @media (min-width: 768px) { .cabin-viewport { display: flex; flex-direction: row; align-items: center; justify-content: center; padding: 0.5rem; } }
+
   .hud-top-bar { position: absolute; top: 0.75rem; left: 0.75rem; right: 0.75rem; z-index: 35; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
   .hud-top-bar > * { pointer-events: auto; }
   @media (min-width: 768px) { .hud-top-bar { top: 1.25rem; left: 1.5rem; right: 1.5rem; max-width: 96vw; margin: 0 auto; } }
+
   .scene-scroll-area { flex: 1 1 0%; min-height: 0; width: 100%; overflow-x: auto; overflow-y: hidden; position: relative; display: flex; align-items: center; justify-content: flex-start; touch-action: pan-x; -webkit-overflow-scrolling: touch; }
   @media (min-width: 768px) { .scene-scroll-area { flex: none; width: auto; height: auto; overflow: visible; justify-content: center; } }
   .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   .hide-scrollbar::-webkit-scrollbar { display: none; }
+
   .scene-container { position: relative; display: inline-block; max-width: 96vw; max-height: 84vh; border-radius: 1rem; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8); background-color: #000; }
   .base-image { display: block; max-height: 84vh; max-width: 96vw; width: auto; height: auto; object-fit: contain; user-select: none; }
   .passenger-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
+
   @media (max-width: 767px) {
     .scene-container { height: 100%; border-radius: 0; max-width: none; max-height: none; flex-shrink: 0; box-shadow: none; }
     .scene-container.aisle-scene { width: 140vw; }
@@ -410,48 +385,51 @@
     .scene-scroll-area:active .ambient-sway { animation-play-state: paused; }
     @keyframes swayPan { 0% { transform: translateX(-1.2%); } 100% { transform: translateX(1.2%); } }
   }
-  .bottom-ui-panel { position: absolute; bottom: 1.5rem; left: 50%; transform: translateX(-50%); width: 91.666667%; max-width: 48rem; z-index: 50; display: flex; flex-direction: column; align-items: center; gap: 1rem; pointer-events: none; }
-  @media (max-width: 767px) { .bottom-ui-panel { position: relative; bottom: auto; left: auto; transform: none; width: 100%; max-width: none; flex-shrink: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem 1rem; background: #0f0e0d; border-top: 1px solid #262320; pointer-events: auto; } }
-  .dialogue-wrapper { position: absolute; bottom: 1.5rem; left: 50%; transform: translateX(-50%); width: 91.666667%; max-width: 54rem; z-index: 30; pointer-events: none; }
-  @media (max-width: 767px) { .dialogue-wrapper { position: relative; bottom: auto; left: auto; transform: none; width: 100%; max-width: none; flex-shrink: 0; z-index: 30; pointer-events: auto; background: #0f0e0d; border-top: 1px solid #262320; max-height: 48vh; overflow-y: auto; } }
-  .aisle-call-badge { position: absolute; z-index: 25; display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.875rem; border-radius: 0.75rem; background: linear-gradient(135deg, rgba(244, 63, 94, 0.95), rgba(225, 29, 72, 0.95)); border: 2px solid rgba(254, 205, 211, 0.9); color: #ffffff; font-size: 0.8125rem; box-shadow: 0 10px 25px -3px rgba(225, 29, 72, 0.6), 0 0 15px rgba(244, 63, 94, 0.5); cursor: pointer; white-space: nowrap; transition: filter 0.15s ease, box-shadow 0.15s ease; }
-  .aisle-call-badge:hover { filter: brightness(1.15); box-shadow: 0 12px 30px -3px rgba(225, 29, 72, 0.8), 0 0 25px rgba(244, 63, 94, 0.75); }
-  .call-ping { position: absolute; top: -4px; right: -4px; width: 12px; height: 12px; border-radius: 9999px; background-color: #f43f5e; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite; }
+
+  /* КОМПАКТНАЯ НИЖНЯЯ ПАНЕЛЬ */
+  .bottom-ui-panel { position: absolute; bottom: calc(0.5rem + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: 91.666667%; max-width: 48rem; z-index: 50; display: flex; flex-direction: column; align-items: center; gap: 0.25rem; pointer-events: none; }
+  @media (max-width: 767px) {
+    .bottom-ui-panel { position: absolute; bottom: calc(0.5rem + env(safe-area-inset-bottom)); width: 100%; max-width: none; padding: 0 0.5rem; gap: 0; }
+  }
+
+  /* Универсальная кнопка действия */
+  .main-action-btn { width: 100%; max-width: 24rem; padding: 0.65rem 1.25rem; border-radius: 9999px; font-weight: 800; font-size: 0.875rem; color: #fff; background-image: linear-gradient(to right, var(--tw-gradient-stops)); border-width: 1px; box-shadow: 0 10px 20px -5px rgba(0,0,0,0.5); cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.25rem; }
+  .main-action-btn:active { transform: scale(0.98); }
+
+  .dialogue-wrapper { position: absolute; bottom: calc(0.5rem + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: 91.666667%; max-width: 54rem; z-index: 30; pointer-events: none; }
+  @media (max-width: 767px) { .dialogue-wrapper { position: absolute; bottom: 0; width: 100%; max-width: none; flex-shrink: 0; pointer-events: auto; max-height: 55vh; overflow-y: auto; } }
+
+  /* Остальные классы HUD */
+  .aisle-call-badge { position: absolute; z-index: 25; display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.875rem; border-radius: 0.75rem; background: linear-gradient(135deg, rgba(244, 63, 94, 0.95), rgba(225, 29, 72, 0.95)); border: 2px solid rgba(254, 205, 211, 0.9); color: #ffffff; font-size: 0.8125rem; box-shadow: 0 10px 25px -3px rgba(225, 29, 72, 0.6); cursor: pointer; white-space: nowrap; }
+  .call-ping { position: absolute; top: -4px; right: -4px; width: 12px; height: 12px; border-radius: 9999px; background-color: #f43f5e; animation: ping 1.5s infinite; }
   @keyframes ping { 75%, 100% { transform: scale(2); opacity: 0; } }
+
   .aisle-phase-banner { position: relative; z-index: 25; }
-  .phase-banner-content { display: flex; align-items: center; gap: 0.65rem; padding: 0.35rem 0.8rem; border-radius: 0.625rem; background: rgba(20, 18, 16, 0.92); backdrop-filter: blur(10px); border: 1px solid #3d3831; color: #f5f3ef; font-size: 0.75rem; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6); }
+  .phase-banner-content { display: flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.6rem; border-radius: 0.5rem; background: rgba(20, 18, 16, 0.92); backdrop-filter: blur(10px); border: 1px solid #3d3831; color: #f5f3ef; font-size: 0.6875rem; box-shadow: 0 4px 15px rgba(0,0,0,0.6); }
   .phase-round { border-color: rgba(245, 158, 11, 0.4); }
   .phase-cruise { border-color: rgba(59, 130, 246, 0.4); background: rgba(15, 23, 42, 0.92); }
-  .phase-warning { border-color: rgba(245, 158, 11, 0.8); background: rgba(45, 30, 15, 0.95); box-shadow: 0 0 20px rgba(245, 158, 11, 0.3); }
+  .phase-warning { border-color: rgba(245, 158, 11, 0.8); background: rgba(45, 30, 15, 0.95); }
   .phase-arrival { border-color: rgba(16, 185, 129, 0.5); background: rgba(10, 30, 20, 0.92); }
-  .phase-pulse-dot { width: 8px; height: 8px; border-radius: 50%; background-color: #3b82f6; box-shadow: 0 0 8px #3b82f6; animation: pulse 1.5s infinite; }
-  .top-actions-cluster { position: relative; z-index: 25; display: flex; align-items: center; gap: 0.5rem; }
-  @media (max-width: 640px) { .phase-banner-content { font-size: 0.6875rem; padding: 0.25rem 0.5rem; gap: 0.4rem; } .seat-map-trigger-btn { font-size: 0.6875rem; padding: 0.25rem 0.5rem; } }
-  .seat-map-trigger-btn { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.85rem; border-radius: 0.625rem; background: rgba(26, 24, 22, 0.9); backdrop-filter: blur(10px); border: 1px solid #3d3831; color: #f5f3ef; font-size: 0.75rem; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6); transition: all 0.15s ease; }
-  .seat-map-trigger-btn:hover { background: rgba(40, 36, 32, 0.95); border-color: #f59e0b; color: #f59e0b; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.7), 0 0 12px rgba(245, 158, 11, 0.2); }
-  .trigger-icon { font-size: 0.875rem; }
-  .trigger-alert-badge { position: relative; display: inline-flex; align-items: center; justify-content: center; padding: 0.1rem 0.4rem; border-radius: 9999px; background: #e11d48; color: #ffffff; font-size: 0.6875rem; font-weight: 700; line-height: 1; }
-  .trigger-alert-ping { position: absolute; inset: -2px; border-radius: 9999px; background: #f43f5e; opacity: 0.75; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite; }
-  .station-toast-overlay { position: absolute; top: 1.25rem; left: 50%; transform: translateX(-50%); z-index: 50; pointer-events: none; max-width: 90vw; }
-  .toast-card { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; padding: 0.6rem 1.25rem; border-radius: 0.75rem; background: rgba(20, 18, 16, 0.95); backdrop-filter: blur(14px); border: 1px solid rgba(245, 158, 11, 0.6); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), 0 0 18px rgba(245, 158, 11, 0.25); text-align: center; color: #f5f3ef; }
-  .toast-title { font-size: 0.875rem; font-weight: 700; color: #f59e0b; letter-spacing: 0.02em; }
-  .toast-subtitle { font-size: 0.75rem; font-weight: 500; color: #d6d3cd; line-height: 1.3; }
-  .confirm-modal-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; padding: 1rem; }
-  .confirm-modal-box { width: 100%; max-width: 440px; background: #1a1816; border: 1px solid #4a433a; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8), 0 0 25px rgba(245, 158, 11, 0.15); display: flex; flex-direction: column; gap: 1rem; color: #f5f3ef; }
-  .confirm-title { font-size: 1.125rem; font-weight: 700; color: #f59e0b; }
-  .confirm-desc { font-size: 0.875rem; color: #a8a29e; line-height: 1.5; }
-  .confirm-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
-  .confirm-btn-cancel { padding: 0.5rem 1rem; border-radius: 0.5rem; background: #282420; border: 1px solid #4a433a; color: #d6d3cd; font-size: 0.8125rem; font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
-  .confirm-btn-cancel:hover { background: #342f2a; color: #ffffff; }
-  .confirm-btn-ok { padding: 0.5rem 1.1rem; border-radius: 0.5rem; background: linear-gradient(135deg, #f59e0b, #d97706); border: 1px solid #fbbf24; color: #0f0e0d; font-size: 0.8125rem; font-weight: 700; cursor: pointer; box-shadow: 0 2px 10px rgba(245, 158, 11, 0.3); transition: all 0.15s ease; }
-  .confirm-btn-ok:hover { background: linear-gradient(135deg, #fbbf24, #f59e0b); transform: translateY(-1px); box-shadow: 0 4px 15px rgba(245, 158, 11, 0.45); }
+  .phase-pulse-dot { width: 6px; height: 6px; border-radius: 50%; background-color: #3b82f6; animation: pulse 1.5s infinite; }
+
+  .top-actions-cluster { position: relative; z-index: 25; display: flex; align-items: center; gap: 0.4rem; }
+  .seat-map-trigger-btn { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.6rem; border-radius: 0.5rem; background: rgba(26, 24, 22, 0.9); border: 1px solid #3d3831; color: #f5f3ef; font-size: 0.6875rem; font-weight: 600; cursor: pointer; backdrop-filter: blur(10px); }
+  .seat-map-trigger-btn:hover { background: rgba(40, 36, 32, 0.95); border-color: #f59e0b; color: #f59e0b; }
+  .trigger-alert-badge { position: relative; display: inline-flex; align-items: center; justify-content: center; padding: 0.1rem 0.35rem; border-radius: 999px; background: #e11d48; color: #fff; font-size: 0.6rem; font-weight: 700; line-height: 1; }
+  .trigger-alert-ping { position: absolute; inset: -2px; border-radius: 999px; background: #f43f5e; opacity: 0.75; animation: ping 1.5s infinite; }
+
   .seat-top-bar { position: relative; width: 100%; z-index: 25; display: flex; align-items: center; justify-content: center; pointer-events: none; }
   .seat-top-bar > * { pointer-events: auto; }
-  .seat-stepper-mini { display: flex; align-items: center; gap: 0.35rem; background: rgba(20, 18, 16, 0.92); backdrop-filter: blur(10px); border: 1px solid #3d3831; padding: 0.25rem 0.4rem; border-radius: 0.625rem; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6); }
-  .stepper-mini-btn { padding: 0.3rem 0.65rem; border-radius: 0.375rem; background: #23201c; border: 1px solid #3d3831; color: #d6d3d1; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
-  .stepper-mini-btn:hover { border-color: #f59e0b; color: #f59e0b; background: #2d2822; }
-  .stepper-mini-seat { padding: 0.3rem 0.65rem; border-radius: 0.375rem; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
-  .stepper-mini-seat:hover { background: rgba(245, 158, 11, 0.25); border-color: #f59e0b; }
+  .seat-stepper-mini { display: flex; align-items: center; gap: 0.35rem; background: rgba(20, 18, 16, 0.92); border: 1px solid #3d3831; padding: 0.25rem 0.4rem; border-radius: 0.625rem; }
+  .stepper-mini-btn { padding: 0.3rem 0.65rem; border-radius: 0.375rem; background: #23201c; border: 1px solid #3d3831; color: #d6d3d1; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
+  .stepper-mini-seat { padding: 0.3rem 0.65rem; border-radius: 0.375rem; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
+
+  .station-toast-overlay { position: absolute; top: 3.5rem; left: 50%; transform: translateX(-50%); z-index: 50; pointer-events: none; max-width: 90vw; }
+  .toast-card { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; padding: 0.5rem 1rem; border-radius: 0.75rem; background: rgba(20, 18, 16, 0.95); border: 1px solid rgba(245, 158, 11, 0.6); text-align: center; color: #f5f3ef; }
+  .toast-title { font-size: 0.8rem; font-weight: 700; color: #f59e0b; }
+  .toast-subtitle { font-size: 0.7rem; color: #d6d3cd; }
+
+  /* Параллакс окна */
   .window-viewport { position: absolute; top: 0; bottom: 0; width: 50%; z-index: 1; overflow: hidden; pointer-events: none; }
   .left-viewport { left: 0; }
   .right-viewport { right: 0; transform: scaleX(-1); }
