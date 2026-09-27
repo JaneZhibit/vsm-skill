@@ -297,7 +297,7 @@
   }
 </script>
 
-<div class="w-full max-w-5xl mx-auto p-4 sm:p-6 pb-28 md:pb-8 flex flex-col gap-6 selection:bg-amber-500 selection:text-black">
+<div class="w-full max-w-5xl mx-auto p-4 sm:p-6 pb-40 md:pb-8 flex flex-col gap-6 selection:bg-amber-500 selection:text-black">
   <!-- ==================== ШАПКА АКАДЕМИИ ==================== -->
   <header class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#2d2924] pb-4">
     <div>
