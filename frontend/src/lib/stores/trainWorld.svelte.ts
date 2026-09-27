@@ -156,16 +156,27 @@ export class TrainWorldStore {
   public setRealTime() { physicsState.setRealTime(); this.isEmergencyInterrupted = false; this.syncAudioPlayback(true); }
   public jumpTo(cpIndex: number) { const cp = ROUTE_CHECKPOINTS[cpIndex]; if (cp) { this.interrupt(); this.timeSeconds = timeStringToSeconds(cp.plannedTime); this.speed = cp.baseSpeed; this.syncTripState(); } }
   public togglePause() { this.isPaused = !this.isPaused; this.syncAudioPlayback(true); }
-  public startCruisePhase() {
-    this.shiftPhase = 'cruise';
-    physicsState.isPaused = false;
-
-    // Если мы отправляемся из Москвы (13:50), мгновенно переводим время на 14:00
-    if (this.timeSeconds < DEPARTURE_SECONDS) {
-      physicsState.jumpToTime(DEPARTURE_SECONDS);
-      trainAudio.playVoiceAnnouncement('station_00.wav');
+  public async startCruisePhase() {
+    // Делаем запрос на посадку пассажиров
+    try {
+      const res = await apiFetch('/api/v1/simulation/trip/board', { method: 'POST' });
+      if (res.ok) {
+        const manifest = await res.json();
+        // Заселяем вагон!
+        cabinState.seats = manifest.seats.map((s: any) => convertSeatInfoToPassengerSeat(s));
+      }
+    } catch (e) {
+      console.error('Ошибка при посадке пассажиров', e);
     }
 
+    this.shiftPhase = 'cruise';
+    physicsState.isPaused = false;
+    
+    // Прыгаем ровно на 14:00 (Отправление)
+    physicsState.jumpToTime(DEPARTURE_SECONDS); 
+    this.timeSeconds = DEPARTURE_SECONDS;
+    
+    this.showToast('Посадка завершена', 'Пассажиры на местах. Поезд отправляется!');
     this.syncTripState();
   }
 

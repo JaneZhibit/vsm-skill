@@ -152,8 +152,8 @@ class GameMaster:
                 self.active_triggers = []
                 return {"timeline": timeline, "start_time": start_time_sec, "start_phase": start_phase}
 
-        # РЕЖИМ: PRO или level_*. Начинаем с Москвы (14:00 -> 50400 сек)
-        start_time_sec = 50400
+        # РЕЖИМ: PRO или level_*. Начинаем с Москвы (13:50 -> 49800 сек, за 10 минут до отправления)
+        start_time_sec = 49800
         start_phase = "initial_round"
         self.init_triggers(mode=mode, start_time=start_time_sec)
 

@@ -16,7 +16,7 @@ class TripEngine:
         
         self.passenger_manager = PassengerManager()
         self.game_master = GameMaster()
-        self.passenger_manager.generate_initial_manifest()
+        self.passenger_manager.generate_empty_manifest()
 
     def create_new_trip(
         self,
@@ -33,14 +33,17 @@ class TripEngine:
         setup = self.game_master.generate_timeline(mode, user)
         self.time_seconds = setup["start_time"]
         self.shift_phase = setup["start_phase"]
-        self.speed = 0.0 # Поезд стоит на станции
+        self.speed = 0.0  # Поезд стоит на станции
         self.game_master.init_triggers(mode=mode, start_time=self.time_seconds)
         
-        # 2. Генерируем пассажиров
-        self.passenger_manager.generate_initial_manifest(
-            min_passengers=min_passengers,
-            max_passengers=max_passengers,
-        )
+        # 2. Вагон ПУСТ при старте смены в 13:50 (Приемка), либо заселен если это Урок
+        if mode.startswith("lesson_"):
+            self.passenger_manager.generate_initial_manifest(
+                min_passengers=min_passengers,
+                max_passengers=max_passengers,
+            )
+        else:
+            self.passenger_manager.generate_empty_manifest()
 
         return {
             "manifest": self.passenger_manager.get_manifest(),
@@ -48,6 +51,16 @@ class TripEngine:
             "start_time_seconds": self.time_seconds,
             "start_phase": self.shift_phase
         }
+
+    def board_passengers(self, min_passengers: int = 13, max_passengers: int = 18) -> CabinManifestResponse:
+        """Осуществляет посадку пассажиров перед самым отправлением."""
+        self.passenger_manager.generate_initial_manifest(
+            min_passengers=min_passengers,
+            max_passengers=max_passengers,
+        )
+        self.shift_phase = "cruise"
+        self.time_seconds = 50400.0  # Устанавливаем ровно на 14:00 (Отправление)
+        return self.passenger_manager.get_manifest()
 
     def generate_timeline(self, mode: str = "pro", user: Optional[Dict[str, Any]] = None) -> list:
         setup = self.game_master.generate_timeline(mode, user)

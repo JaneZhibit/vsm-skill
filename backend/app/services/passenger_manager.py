@@ -10,6 +10,16 @@ class PassengerManager:
 
     def __init__(self):
         self.seats: List[SeatInfo] = []
+        self.generate_empty_manifest()
+
+    def generate_empty_manifest(self) -> None:
+        """Создает пустой вагон без пассажиров (для фазы приемки и после прибытия)."""
+        seats_list: List[SeatInfo] = []
+        for seat_id in ALL_SEAT_IDS:
+            row = int(seat_id[:-1])
+            letter = seat_id[-1]
+            seats_list.append(SeatInfo(seat_id=seat_id, row=row, letter=letter, is_occupied=False, passenger=None))
+        self.seats = seats_list
 
     def generate_initial_manifest(self, min_passengers: int = 13, max_passengers: int = 18) -> None:
         target_count = min(random.randint(min_passengers, max_passengers), MAX_PASSENGERS)

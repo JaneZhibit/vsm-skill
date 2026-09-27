@@ -157,7 +157,7 @@
         {#if trainWorld.shiftPhase === 'initial_round'}
           <div class="phase-banner-content phase-round">
             <span class="phase-text">
-              📋 <strong>Ожидание отправления (Москва)</strong> • АСКП: {trainWorld.validatedCount}/{trainWorld.occupiedSeatsCount}
+              📋 <strong>Приемка вагона (13:50)</strong> • Вагон пуст. Проверьте оборудование перед рейсом.
             </span>
           </div>
         {:else if trainWorld.shiftPhase === 'cruise'}
@@ -402,7 +402,7 @@
             disabled={!trainWorld.isPreTripDone}
             class="px-6 py-2.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 font-bold rounded-full shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:grayscale disabled:hover:scale-100"
           >
-            <span>{trainWorld.isPreTripDone ? '🚀 Отправиться в рейс (14:00) ➔' : '🔍 Проведите приемку вагона перед рейсом...'}</span>
+            <span>{trainWorld.isPreTripDone ? '🚪 Начать посадку и отправиться (14:00) ➔' : '🔍 Проведите приемку вагона перед рейсом...'}</span>
           </button>
         {:else if trainWorld.shiftPhase === 'cruise'}
           <button onclick={() => { playClickSound(); trainWorld.skipToNextEvent(); }} class="px-6 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-500 hover:from-cyan-500 hover:to-teal-400 text-white font-bold rounded-full shadow-[0_4px_20px_rgba(6,182,212,0.4)] transition-all hover:scale-105 flex items-center gap-2 cursor-pointer">

@@ -13,29 +13,35 @@ class TestTripEngine(unittest.TestCase):
         self.engine = TripEngine()
 
     def test_new_trip_generation(self):
-        """Проверка инициализации рейса: 13-18 пассажиров, 2А — Воронов, нет тех. станций."""
+        """Проверка инициализации рейса: пустой вагон при приемке, затем 13-18 пассажиров при посадке."""
         for _ in range(10):
             trip_data = self.engine.create_new_trip(min_passengers=13, max_passengers=18)
             manifest = trip_data["manifest"]
             self.assertEqual(manifest.total_seats, 48)
-            self.assertGreaterEqual(manifest.occupied_count, 13)
-            self.assertLessEqual(manifest.occupied_count, 18)
-            self.assertLessEqual(manifest.occupied_count, MAX_PASSENGERS)
+            # В фазе приемки (13:50) вагон пуст
+            self.assertEqual(manifest.occupied_count, 0)
+
+            # Посадка пассажиров перед отправлением (14:00)
+            boarded_manifest = self.engine.board_passengers(min_passengers=13, max_passengers=18)
+            self.assertGreaterEqual(boarded_manifest.occupied_count, 13)
+            self.assertLessEqual(boarded_manifest.occupied_count, 18)
+            self.assertLessEqual(boarded_manifest.occupied_count, MAX_PASSENGERS)
 
             # Проверка занятых мест
-            occupied_seats = [s for s in manifest.seats if s.is_occupied]
+            occupied_seats = [s for s in boarded_manifest.seats if s.is_occupied]
             for s in occupied_seats:
                 self.assertIsNotNone(s.passenger)
                 self.assertTrue(len(s.passenger.full_name) > 0)
 
             # Проверка отсутствия технических станций в качестве назначения
-            for s in manifest.seats:
+            for s in boarded_manifest.seats:
                 if s.is_occupied and s.passenger:
                     self.assertNotIn(s.passenger.destination, ["Горки", "Тигода"])
 
     def test_full_route_simulation(self):
         """Симуляция прохождения всех 16 станций маршрута от Москвы до СПб."""
         self.engine.create_new_trip(min_passengers=15, max_passengers=15)
+        self.engine.board_passengers(min_passengers=15, max_passengers=15)
 
         for idx in range(1, TOTAL_STATIONS):
             st = ROUTE_STATIONS[idx]
@@ -58,8 +64,8 @@ class TestTripEngine(unittest.TestCase):
 
     def test_passenger_traits(self):
         """Проверка генерации черт характера (traits) и пола."""
-        trip_data = self.engine.create_new_trip(min_passengers=15, max_passengers=15)
-        manifest = trip_data["manifest"]
+        self.engine.create_new_trip(min_passengers=15, max_passengers=15)
+        manifest = self.engine.board_passengers(min_passengers=15, max_passengers=15)
         for s in manifest.seats:
             if s.is_occupied and s.passenger:
                 self.assertIn(s.passenger.trait, ["polite", "anxious", "demanding"])

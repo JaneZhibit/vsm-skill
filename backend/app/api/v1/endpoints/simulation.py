@@ -46,6 +46,13 @@ async def create_new_trip(
     return trip_data
 
 
+@router.post("/trip/board", response_model=CabinManifestResponse)
+async def board_passengers_to_train(user: Dict[str, Any] = Depends(get_current_user)):
+    """Осуществляет посадку пассажиров. Переход от Приемки к Рейсу."""
+    engine = trip_manager.get_trip(user["id"])
+    return engine.board_passengers()
+
+
 @router.post("/trip/spawn-specific", response_model=CabinManifestResponse)
 async def trigger_specific_incident(
     payload: SpawnSpecificRequest,
