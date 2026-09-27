@@ -1,4 +1,4 @@
-import random
+﻿import random
 from typing import Dict, Any, List, Optional
 from app.schemas.passenger import SeatInfo, ActiveIncidentSchema
 from app.services.scenarios import SCENARIOS_DB, get_frontend_incident_data
@@ -6,7 +6,7 @@ from app.services.gm_timeline import generate_timeline
 from app.services.gm_triggers import execute_live_scenario, execute_builtin_trigger
 
 class GameMaster:
-    """Оркестратор событий и инцидентов (State Machine)."""
+    """РћСЂРєРµСЃС‚СЂР°С‚РѕСЂ СЃРѕР±С‹С‚РёР№ Рё РёРЅС†РёРґРµРЅС‚РѕРІ (State Machine)."""
     def __init__(self):
         self.current_mode = "pro"
         self.active_triggers: List[Dict[str, Any]] = []
@@ -132,7 +132,7 @@ class GameMaster:
         return events_to_fire
 
     def spawn_incident(self, seats: List[SeatInfo], force_incident: Optional[str] = None) -> None:
-        """Назначает инцидент случайному пассажиру."""
+        """Принудительный спавн инцидента."""
         for seat in seats:
             seat.active_incident = None
 
@@ -140,18 +140,35 @@ class GameMaster:
         if not occupied:
             return
 
-        target_seat = random.choice(occupied)
         keys = list(SCENARIOS_DB.keys())
         if not force_incident and not keys:
             return
         incident_id = force_incident or random.choice(keys)
         incident_data = get_frontend_incident_data(incident_id)
+        scenario = SCENARIOS_DB.get(incident_id, {})
+        
+        target_arch = scenario.get("target_archetype", "any")
+        
+        valid_seats = [s for s in occupied if s.passenger.archetype_id == target_arch] if target_arch != "any" else occupied
+        if not valid_seats:
+            from app.services.passenger_generator import generate_passenger
+            target_seat = random.choice(occupied)
+            if target_arch != "any":
+                target_seat.passenger = generate_passenger(
+                    archetype=target_arch,
+                    destination=target_seat.passenger.destination,
+                    ticket_status=target_seat.passenger.ticket_status,
+                    is_boarding=False
+                )
+        else:
+            target_seat = random.choice(valid_seats)
 
         if incident_data:
             target_seat.active_incident = ActiveIncidentSchema(**incident_data)
-            new_state = SCENARIOS_DB.get(incident_id, {}).get("passenger_state_during", "annoyed")
+            new_state = scenario.get("passenger_state_during", "annoyed")
             target_seat.passenger.state = new_state
-            target_seat.passenger.sprite_url = f"/assets/{target_seat.passenger.archetype_id}/{new_state}.png"
+            sprite_mood = "neutral" if new_state == "calm" else new_state
+            target_seat.passenger.sprite_url = f"/assets/{target_seat.passenger.archetype_id}/{sprite_mood}.png"
 
     def apply_lesson_protection(self, result: dict) -> dict:
         res_copy = dict(result)
@@ -162,7 +179,8 @@ class GameMaster:
                 res_copy["safety_delta"] = 0
             
             if res_copy.get("mood") in ["annoyed", "drunk"]:
-                res_copy["feedback_title"] = "Режим обучения: Штраф отменен"
-                res_copy["feedback"] = f"В реальности это решение привело бы к жалобе. Попробуйте еще раз! Анализ: {res_copy.get('feedback', '')}"
+                res_copy["feedback_title"] = "Р РµР¶РёРј РѕР±СѓС‡РµРЅРёСЏ: РЁС‚СЂР°С„ РѕС‚РјРµРЅРµРЅ"
+                res_copy["feedback"] = f"Р’ СЂРµР°Р»СЊРЅРѕСЃС‚Рё СЌС‚Рѕ СЂРµС€РµРЅРёРµ РїСЂРёРІРµР»Рѕ Р±С‹ Рє Р¶Р°Р»РѕР±Рµ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·! РђРЅР°Р»РёР·: {res_copy.get('feedback', '')}"
         
         return res_copy
+
