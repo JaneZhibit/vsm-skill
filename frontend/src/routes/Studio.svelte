@@ -1,32 +1,84 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { playClickSound, playSuccessSound, playErrorSound } from '../lib/utils/audio';
 
   let activeTab = $state<'cases' | 'handbook' | 'constructor'>('constructor');
 
-  // Данные конструктора
+  // --- ДАННЫЕ РЕДАКТОРА ---
   let customTitle = $state<string>('');
-  let targetArchetype = $state<string>('any');
+  let targetArchetype = $state<string>('male_young');
   
   // Триггеры
-  let triggerType = $state<'time' | 'speed' | 'random' | 'chained'>('time');
-  let triggerValue = $state<number>(15);
+  let triggerType = $state<'orchestrator' | 'chained' | 'test'>('orchestrator');
   let triggerParentId = $state<string>('');
-  let triggerDelay = $state<number>(40);
+  let triggerDelay = $state<number>(15);
 
-  // Категории навыков (Мультиселект)
-  let skills = $state({ safety: false, service: true, medicine: false, discipline: false });
+  // Визуал и Аудио
+  let isPassive = $state<boolean>(false);
+  let ambientAudio = $state<string>('');
+  let previewAudioObj = $state<HTMLAudioElement | null>(null);
 
-  // Поведение
-  let passengerState = $state<string>('annoyed');
-  let isPassive = $state<boolean>(true);
+  // Компетенции
+  let skills = $state<Record<string, boolean>>({ safety: false, service: true, medicine: false, discipline: false });
+
+  // ИИ (LLM)
+  let allowedMoods = $state<string[]>(['neutral']);
   let llmSystemPrompt = $state<string>('');
   let expectedRule = $state<string>('');
 
+  // Состояние UI
   let isSaving = $state<boolean>(false);
   let successMessage = $state<string | null>(null);
   let errorMessage = $state<string | null>(null);
-  let lastCreatedId = $state<string | null>(null);
-  let copyFeedback = $state<boolean>(false);
+  let existingScenarios = $state<{id: string, title: string}[]>([]);
+
+  // Словари для UI
+  const ALL_MOODS = ['neutral', 'angry', 'happy', 'sleeping', 'sick', 'drunk', 'vaping_calm', 'vaping_angry', 'crying'];
+  const AUDIO_FILES = [
+    { id: '', label: '🔇 Без звука' },
+    { id: 'crying_child.mp3', label: '😭 Плач ребенка' },
+    { id: 'vape_hiss.mp3', label: '💨 Шипение вейпа' },
+    { id: 'kid_playing.mp3', label: '📱 Звуки мобильной игры' },
+  ];
+
+  // --- РЕАКТИВНЫЙ ПРЕВЬЮ ПАССАЖИРА ---
+  let previewMood = $derived(allowedMoods.length > 0 ? allowedMoods[0] : 'neutral');
+  let previewArchetype = $derived(targetArchetype === 'any' ? 'male_young' : targetArchetype);
+  let previewImageUrl = $derived(`/assets/passengers/${previewArchetype}/${previewMood}.png`);
+
+  onMount(async () => {
+    // Загружаем список существующих событий для "Цепной реакции"
+    try {
+      const res = await fetch('/api/v1/simulation/custom-live-scenario');
+      if (res.ok) {
+        existingScenarios = await res.json();
+      }
+    } catch {}
+  });
+
+  function toggleMood(mood: string) {
+    playClickSound();
+    if (allowedMoods.includes(mood)) {
+      if (allowedMoods.length > 1) {
+        allowedMoods = allowedMoods.filter(m => m !== mood);
+      }
+    } else {
+      allowedMoods = [...allowedMoods, mood];
+    }
+  }
+
+  function toggleAudioPreview() {
+    if (!ambientAudio) return;
+    if (previewAudioObj) {
+      previewAudioObj.pause();
+      previewAudioObj = null;
+    } else {
+      previewAudioObj = new Audio(`/storage/audio/ambient/${ambientAudio}`);
+      previewAudioObj.volume = 0.5;
+      previewAudioObj.loop = true;
+      previewAudioObj.play().catch(() => {});
+    }
+  }
 
   async function handleSaveScenario() {
     playClickSound();
@@ -34,23 +86,19 @@
     successMessage = null;
     errorMessage = null;
 
-    // Собираем выбранные скиллы в массив
-    const selectedSkills = Object.entries(skills)
-      .filter(([_, isSelected]) => isSelected)
-      .map(([key]) => key);
+    const selectedSkills = Object.entries(skills).filter(([_, val]) => val).map(([key]) => key);
 
-    const generatedIncidentId = customTitle.trim() ? `live_evt_${customTitle.trim().toLowerCase().replace(/\s+/g, '_')}_${Date.now()}` : `live_evt_${Date.now()}`;
     const payload = {
-      incident_id: generatedIncidentId,
+      incident_id: `evt_${Date.now()}`,
       title: customTitle.trim() || 'Новое событие',
       target_archetype: targetArchetype,
       trigger: {
         type: triggerType,
-        value: triggerType !== 'chained' ? Number(triggerValue) : null,
-        parent_id: triggerType === 'chained' ? triggerParentId.trim() : null,
-        delay_sec: triggerType === 'chained' ? Number(triggerDelay) : null
+        parent_id: triggerType === 'chained' ? triggerParentId : null,
+        delay_sec: Number(triggerDelay)
       },
-      passenger_state: passengerState,
+      allowed_moods: allowedMoods,
+      ambient_audio: ambientAudio || null,
       is_passive: isPassive,
       llm_system_prompt: llmSystemPrompt.trim(),
       expected_rule: expectedRule.trim(),
@@ -65,12 +113,14 @@
       });
 
       if (res.ok) {
-        const data = await res.json();
-        const createdId = data.incident_id || generatedIncidentId;
-        lastCreatedId = createdId;
         playSuccessSound();
-        successMessage = `Событие успешно зарегистрировано в GameMaster! ID: ${createdId}`;
-        customTitle = '';
+        successMessage = triggerType === 'test' 
+          ? 'Тестовое событие готово! Запустите PRO-Рейс, оно сработает по таймеру.'
+          : 'Событие добавлено в пул GameMaster!';
+        
+        // Обновляем список родителей
+        const json = await res.json();
+        existingScenarios = [...existingScenarios, { id: json.incident_id || payload.incident_id, title: payload.title }];
       } else {
         throw new Error(`Ошибка: ${res.status}`);
       }
@@ -81,30 +131,13 @@
       isSaving = false;
     }
   }
-
-  function useAsChainedParent() {
-    if (lastCreatedId) {
-      triggerType = 'chained';
-      triggerParentId = lastCreatedId;
-      playClickSound();
-    }
-  }
-
-  async function copyLastId() {
-    if (lastCreatedId) {
-      await navigator.clipboard.writeText(lastCreatedId);
-      copyFeedback = true;
-      setTimeout(() => { copyFeedback = false; }, 2000);
-      playClickSound();
-    }
-  }
 </script>
 
-<div class="w-full max-w-5xl mx-auto p-4 sm:p-6 flex flex-col gap-6">
+<div class="w-full max-w-[1200px] mx-auto p-4 sm:p-6 flex flex-col gap-6 selection:bg-amber-500 selection:text-black">
   <header class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#2d2924] pb-4">
     <div>
-      <h1 class="text-lg sm:text-xl font-bold text-[#f5f3ef] tracking-wide">Студия сценариев</h1>
-      <p class="text-xs text-[#a39e95] mt-0.5">Создание эмерджентных (живых) ситуаций для PRO-симуляции</p>
+      <h1 class="text-xl font-bold text-[#f5f3ef] tracking-wide">Режиссер Симуляции (Event Builder)</h1>
+      <p class="text-xs text-[#a39e95] mt-0.5">Создание нелинейных ИИ-событий для PRO-режима</p>
     </div>
     <div class="bg-[#1a1816] p-1 rounded-xl border border-[#2d2924] inline-flex gap-1">
       <button onclick={() => { activeTab = 'constructor'; playClickSound(); }} class="px-3.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all {activeTab === 'constructor' ? 'bg-amber-950/40 text-amber-300 border border-amber-500/60 shadow-sm' : 'text-[#a39e95]'}">
@@ -117,155 +150,178 @@
   </header>
 
   {#if activeTab === 'constructor'}
-    <div class="p-5 rounded-2xl bg-[#141210] border border-[#2d2924] flex flex-col gap-6 shadow-xl">
-      <div class="flex items-center justify-between border-b border-[#2d2924] pb-3">
-        <div>
-          <h2 class="text-base font-bold text-amber-400 flex items-center gap-2">
-            <span>⚙️ Event-Конструктор (Движок PRO-режима)</span>
-          </h2>
-          <p class="text-[11px] text-[#a39e95] mt-1">Определите условия, связи графа и развиваемые компетенции.</p>
-        </div>
-      </div>
+    {#if successMessage}
+      <div class="p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-500/50 text-emerald-300 text-sm font-bold flex items-center gap-2.5">✅ {successMessage}</div>
+    {/if}
+    {#if errorMessage}
+      <div class="p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/50 text-rose-300 text-sm font-bold flex items-center gap-2.5">❌ {errorMessage}</div>
+    {/if}
 
-      {#if successMessage}
-        <div class="p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-500/50 text-emerald-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <span class="flex items-center gap-2">✅ {successMessage}</span>
-          <div class="flex items-center gap-2">
-            <button onclick={copyLastId} class="px-2.5 py-1 bg-emerald-900/60 hover:bg-emerald-800 text-[11px] rounded border border-emerald-400/40 cursor-pointer transition-all font-mono">
-              {copyFeedback ? '✓ Скопировано' : '📋 Скопировать ID'}
-            </button>
-            <button onclick={useAsChainedParent} class="px-2.5 py-1 bg-indigo-900/60 hover:bg-indigo-800 text-[11px] rounded border border-indigo-400/40 cursor-pointer transition-all text-indigo-200">
-              🔗 Связать следующее событие
-            </button>
-          </div>
-        </div>
-      {/if}
-      {#if errorMessage}
-        <div class="p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/50 text-rose-300 text-xs flex items-center gap-2.5">❌ {errorMessage}</div>
-      {/if}
-
-      <!-- БЛОК: ТЕГИ КОМПЕТЕНЦИЙ -->
-      <div class="p-3.5 rounded-xl bg-[#1a1816] border border-[#3d3831]">
-        <label for="competence-group" class="text-[11px] font-bold text-stone-300 uppercase tracking-wider block mb-2">Категории развития (Для ИИ-подбора в PRO)</label>
-        <div id="competence-group" class="flex flex-wrap gap-2">
-          <label class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border cursor-pointer transition-all {skills.service ? 'bg-amber-950/40 border-amber-500 text-amber-300' : 'bg-[#0f0e0d] border-[#3d3831] text-[#706b63]'}">
-            <input type="checkbox" bind:checked={skills.service} class="hidden" /> 🤝 Сервис
-          </label>
-          <label class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border cursor-pointer transition-all {skills.safety ? 'bg-emerald-950/40 border-emerald-500 text-emerald-300' : 'bg-[#0f0e0d] border-[#3d3831] text-[#706b63]'}">
-            <input type="checkbox" bind:checked={skills.safety} class="hidden" /> 🛡️ Безопасность
-          </label>
-          <label class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border cursor-pointer transition-all {skills.medicine ? 'bg-rose-950/40 border-rose-500 text-rose-300' : 'bg-[#0f0e0d] border-[#3d3831] text-[#706b63]'}">
-            <input type="checkbox" bind:checked={skills.medicine} class="hidden" /> 🩺 Медицина
-          </label>
-          <label class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border cursor-pointer transition-all {skills.discipline ? 'bg-blue-950/40 border-blue-500 text-blue-300' : 'bg-[#0f0e0d] border-[#3d3831] text-[#706b63]'}">
-            <input type="checkbox" bind:checked={skills.discipline} class="hidden" /> 📜 Регламент
-          </label>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        
-        <!-- ЛЕВАЯ КОЛОНКА: БАЗА И ТРИГГЕРЫ -->
-        <div class="space-y-4">
-          <!-- КТО -->
-          <div class="p-4 rounded-xl bg-[#1a1816] border border-[#3d3831] space-y-3">
-            <h3 class="text-xs font-bold text-stone-300 uppercase tracking-wider mb-2 border-b border-[#2d2924] pb-1">1. Идентификация</h3>
-            
-            <div class="space-y-1.5">
-              <label for="custom-title-input" class="text-[11px] text-[#a39e95]">Название события (для логов)</label>
-              <input id="custom-title-input" bind:value={customTitle} type="text" class="w-full px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-white outline-none" placeholder="Например: Плачущий ребенок" />
-            </div>
-
-            <div class="space-y-1.5">
-              <label for="target-archetype-select" class="text-[11px] text-[#a39e95]">Архетип пассажира</label>
-              <select id="target-archetype-select" bind:value={targetArchetype} class="w-full px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-white outline-none">
-                <option value="any">🎲 Любой (Случайный)</option>
-                <option value="male_young">👨 Молодой мужчина</option>
-                <option value="female_young">👩 Молодая девушка</option>
-                <option value="female_elderly">👵 Пожилая женщина</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- КОГДА (Динамический триггер) -->
-          <div class="p-4 rounded-xl bg-[#1a1816] border border-[#3d3831] space-y-3 relative overflow-hidden">
-            <h3 class="text-xs font-bold text-stone-300 uppercase tracking-wider mb-2 border-b border-[#2d2924] pb-1">2. Условия срабатывания</h3>
-            
-            <div class="space-y-1.5">
-              <label for="trigger-type-select" class="text-[11px] text-[#a39e95]">Тип триггера</label>
-              <select id="trigger-type-select" bind:value={triggerType} class="w-full px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs font-bold text-amber-300 outline-none">
-                <option value="time">⏱ По таймеру (Через X сек после старта)</option>
-                <option value="speed">🚄 По скорости (Свыше X км/ч)</option>
-                <option value="random">🎲 Случайное (X% шанс)</option>
-                <option value="chained">🔗 Цепная реакция (Эффект бабочки)</option>
-              </select>
-            </div>
-
-            <!-- Динамическое поле в зависимости от типа триггера -->
-            {#if triggerType === 'chained'}
-              <div class="p-3 rounded-lg bg-indigo-950/20 border border-indigo-500/30 space-y-3">
-                <div class="space-y-1.5">
-                  <label for="trigger-parent-input" class="text-[11px] text-indigo-300 font-mono">ID родительского события</label>
-                  <input id="trigger-parent-input" bind:value={triggerParentId} type="text" class="w-full px-3 py-1.5 rounded bg-[#0f0e0d] border border-[#3d3831] text-xs text-white" placeholder="Например: live_crying_child" />
-                </div>
-                <div class="space-y-1.5">
-                  <label for="trigger-delay-input" class="text-[11px] text-indigo-300 font-mono">Активировать если не решено (сек):</label>
-                  <input id="trigger-delay-input" bind:value={triggerDelay} type="number" class="w-full px-3 py-1.5 rounded bg-[#0f0e0d] border border-[#3d3831] text-xs font-mono text-white" />
-                </div>
-              </div>
-            {:else}
-              <div class="space-y-1.5">
-                <label for="trigger-value-input" class="text-[11px] text-[#a39e95]">Значение (Секунды / Скорость / Проценты)</label>
-                <input id="trigger-value-input" bind:value={triggerValue} type="number" class="w-full px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs font-mono text-white outline-none" />
-              </div>
-            {/if}
-
-            <div class="flex items-center gap-2 mt-4 pt-2 border-t border-[#2d2924]">
-              <input type="checkbox" id="is-passive" bind:checked={isPassive} class="w-4 h-4 accent-amber-500 cursor-pointer" />
-              <label for="is-passive" class="text-[11px] text-[#a39e95] cursor-pointer leading-tight">
-                <strong class="text-white">Скрытое событие (Без вызова)</strong><br>Не зажигать лампочку. Проводник должен заметить сам (увидит или услышит).
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <!-- ПРАВАЯ КОЛОНКА: ИИ И ПОВЕДЕНИЕ -->
-        <div class="p-4 rounded-xl bg-gradient-to-br from-[#1a1816] to-[#12110f] border border-amber-900/30 space-y-4">
-          <h3 class="text-xs font-bold text-amber-400 uppercase tracking-wider border-b border-amber-900/30 pb-1 flex items-center gap-2">
-            <span>🧠 3. Состояние и ИИ-Инструкция</span>
-          </h3>
-
-          <div class="space-y-1.5">
-            <label for="passenger-state-select" class="text-[11px] text-[#a39e95]">Анимация / Аудио-тег в вагоне</label>
-            <select id="passenger-state-select" bind:value={passengerState} class="w-full px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-white outline-none">
-              <option value="vaping">💨 Курит Вейп (Визуальный дым)</option>
-              <option value="crying_child">😭 Плач ребенка (Пространственное аудио)</option>
-              <option value="drunk">🍺 Нетрезвый (Покачивание)</option>
-              <option value="sleeping">💤 Спит (Zzz)</option>
-              <option value="annoyed">😤 Недоволен / Злой</option>
-            </select>
-          </div>
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      
+      <!-- ЛЕВАЯ КОЛОНКА: Идентификация и Визуал (Превью) -->
+      <div class="lg:col-span-4 space-y-4">
+        <div class="p-5 rounded-2xl bg-[#141210] border border-[#2d2924] shadow-lg flex flex-col gap-4">
+          <h3 class="text-xs font-bold text-amber-400 uppercase tracking-wider border-b border-[#2d2924] pb-2">1. Актер и Визуал</h3>
           
           <div class="space-y-1.5">
-            <label for="llm-system-prompt-textarea" class="text-[11px] text-[#a39e95]">Промпт для нейросети (Роль и характер)</label>
-            <textarea id="llm-system-prompt-textarea" bind:value={llmSystemPrompt} rows="4" class="w-full px-3.5 py-2.5 rounded-xl bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-emerald-300 italic outline-none leading-relaxed" placeholder="Опиши, как пассажир должен отвечать..."></textarea>
+            <label for="custom-title-input" class="text-[11px] text-[#a39e95]">Название события</label>
+            <input id="custom-title-input" bind:value={customTitle} type="text" class="w-full px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-white outline-none transition-all" placeholder="Например: Пьяный сосед" />
           </div>
 
           <div class="space-y-1.5">
-            <label for="expected-rule-textarea" class="text-[11px] text-[#a39e95]">Критерий успеха (Эталонный ответ проводника)</label>
-            <textarea id="expected-rule-textarea" bind:value={expectedRule} rows="3" class="w-full px-3.5 py-2.5 rounded-xl bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-amber-300 outline-none leading-relaxed" placeholder="Укажи правила или алгоритм, который ИИ будет искать в ответе игрока..."></textarea>
+            <label for="target-archetype-select" class="text-[11px] text-[#a39e95]">Архетип (Кто это?)</label>
+            <select id="target-archetype-select" bind:value={targetArchetype} class="w-full px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-white outline-none">
+              <option value="any">🎲 Любой случайный</option>
+              <option value="male_young">👨 Молодой парень</option>
+              <option value="female_young">👩 Девушка</option>
+              <option value="female_elderly">👵 Пожилая женщина</option>
+            </select>
+          </div>
+
+          <!-- Окно Превью Спрайта -->
+          <div class="w-full aspect-square bg-[#0a0908] rounded-xl border border-[#2d2924] relative overflow-hidden flex items-center justify-center shadow-inner">
+            <div class="absolute top-2 left-2 px-2 py-0.5 bg-black/60 rounded text-[9px] text-[#706b63] border border-[#2d2924] z-10 backdrop-blur-md">Превью ({previewMood})</div>
+            
+            <img 
+              src={previewImageUrl} 
+              alt="Превью" 
+              class="w-[85%] h-[85%] object-contain opacity-90 transition-all duration-300"
+              onerror={(e) => { const img = e.currentTarget as HTMLImageElement; img.src = `/assets/passengers/${previewArchetype}/neutral.png`; }}
+            />
+          </div>
+
+          <div class="space-y-2">
+            <label for="mood-chips" class="text-[11px] text-[#a39e95]">Доступные эмоции (ИИ выберет из них)</label>
+            <div id="mood-chips" class="flex flex-wrap gap-1.5">
+              {#each ALL_MOODS as mood}
+                <button 
+                  type="button"
+                  onclick={() => toggleMood(mood)}
+                  class="px-2 py-1 rounded text-[10px] font-mono border transition-all cursor-pointer {allowedMoods.includes(mood) ? 'bg-amber-500/20 border-amber-500 text-amber-300' : 'bg-[#0f0e0d] border-[#2d2924] text-[#706b63] hover:border-[#706b63]'}"
+                >
+                  {mood}
+                </button>
+              {/each}
+            </div>
           </div>
         </div>
-
       </div>
 
-      <div class="flex justify-end pt-4 border-t border-[#2d2924]">
-        <button onclick={handleSaveScenario} disabled={isSaving} class="px-8 py-3.5 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-500 hover:from-amber-500 text-stone-950 font-bold text-xs sm:text-sm tracking-wide shadow-lg shadow-amber-500/20 cursor-pointer transition-all flex items-center gap-2 hover:scale-105 active:scale-95">
-          <span>{isSaving ? '⏳ Добавление...' : '🚀 Зарегистрировать событие'}</span>
-        </button>
+      <!-- СРЕДНЯЯ КОЛОНКА: Триггеры и Аудио -->
+      <div class="lg:col-span-4 space-y-4">
+        <div class="p-5 rounded-2xl bg-[#141210] border border-[#2d2924] shadow-lg flex flex-col gap-5">
+          <h3 class="text-xs font-bold text-emerald-400 uppercase tracking-wider border-b border-[#2d2924] pb-2">2. Триггер и Окружение</h3>
+          
+          <div class="space-y-3">
+            <label for="activation-condition" class="text-[11px] text-[#a39e95]">Условие активации</label>
+            
+            <label class="flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all {triggerType === 'orchestrator' ? 'bg-emerald-950/20 border-emerald-500/50' : 'bg-[#0f0e0d] border-[#2d2924]'}">
+              <input type="radio" bind:group={triggerType} value="orchestrator" class="mt-0.5 accent-emerald-500" />
+              <div>
+                <div class="text-xs font-bold text-white">🧠 Решает Оркестратор</div>
+                <div class="text-[10px] text-[#706b63] leading-tight">Событие попадет в пул. GameMaster запустит его, если у игрока проседают выбранные компетенции.</div>
+              </div>
+            </label>
+
+            <label class="flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all {triggerType === 'chained' ? 'bg-indigo-950/20 border-indigo-500/50' : 'bg-[#0f0e0d] border-[#2d2924]'}">
+              <input type="radio" bind:group={triggerType} value="chained" class="mt-0.5 accent-indigo-500" />
+              <div class="w-full">
+                <div class="text-xs font-bold text-white">🔗 Цепная реакция</div>
+                <div class="text-[10px] text-[#706b63] leading-tight mb-2">Запустится как следствие другого события.</div>
+                {#if triggerType === 'chained'}
+                  <div class="flex flex-col gap-2 mt-2">
+                    <select bind:value={triggerParentId} class="w-full px-2 py-1.5 rounded bg-black border border-indigo-500/30 text-[11px] text-white outline-none">
+                      <option value="" disabled>-- Выберите родительское событие --</option>
+                      {#each existingScenarios as sc}
+                        <option value={sc.id}>{sc.title}</option>
+                      {/each}
+                    </select>
+                    <div class="flex items-center gap-2">
+                      <span class="text-[10px] text-indigo-300">Через</span>
+                      <input bind:value={triggerDelay} type="number" class="w-16 px-2 py-1 rounded bg-black border border-indigo-500/30 text-xs font-mono text-white text-center outline-none" />
+                      <span class="text-[10px] text-indigo-300">секунд</span>
+                    </div>
+                  </div>
+                {/if}
+              </div>
+            </label>
+
+            <label class="flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all {triggerType === 'test' ? 'bg-rose-950/20 border-rose-500/50' : 'bg-[#0f0e0d] border-[#2d2924]'}">
+              <input type="radio" bind:group={triggerType} value="test" class="mt-0.5 accent-rose-500" />
+              <div>
+                <div class="text-xs font-bold text-rose-300">⏱️ Тест по таймеру</div>
+                <div class="flex items-center gap-2 mt-1">
+                  <span class="text-[10px] text-rose-300/70">Запустить через</span>
+                  <input bind:value={triggerDelay} type="number" class="w-16 px-2 py-1 rounded bg-black border border-rose-500/30 text-xs font-mono text-white text-center outline-none" />
+                  <span class="text-[10px] text-rose-300/70">сек после старта</span>
+                </div>
+              </div>
+            </label>
+          </div>
+
+          <div class="space-y-1.5 pt-2 border-t border-[#2d2924]">
+            <label for="ambient-audio-select" class="text-[11px] text-[#a39e95]">Звуковое окружение (Ambient Audio)</label>
+            <div class="flex items-center gap-2">
+              <select id="ambient-audio-select" bind:value={ambientAudio} class="flex-1 px-3 py-2 rounded-lg bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-white outline-none">
+                {#each AUDIO_FILES as af}
+                  <option value={af.id}>{af.label}</option>
+                {/each}
+              </select>
+              {#if ambientAudio}
+                <button type="button" onclick={toggleAudioPreview} class="w-9 h-9 flex items-center justify-center rounded-lg bg-[#282420] border border-[#3d3831] text-amber-400 hover:bg-[#3d3831] transition-colors cursor-pointer" title="Прослушать звук">
+                  {previewAudioObj ? '⏹️' : '🔊'}
+                </button>
+              {/if}
+            </div>
+          </div>
+
+          <label class="flex items-center gap-2 p-2.5 rounded-lg bg-[#0f0e0d] border border-[#2d2924] cursor-pointer">
+            <input type="checkbox" bind:checked={isPassive} class="w-4 h-4 accent-amber-500" />
+            <span class="text-xs text-stone-300 leading-tight">
+              Скрытое событие (Без вызова 🔔)<br>
+              <span class="text-[9px] text-[#706b63]">Игрок должен сам заметить проблему визуально или на слух.</span>
+            </span>
+          </label>
+
+          <!-- Теги компетенций -->
+          <div class="pt-2 border-t border-[#2d2924]">
+            <label for="skills-list" class="text-[10px] font-bold text-[#706b63] uppercase tracking-wider block mb-2">Развиваемые навыки</label>
+            <div id="skills-list" class="flex flex-wrap gap-1.5">
+              {#each Object.keys(skills) as skill}
+                <label class="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-mono border cursor-pointer transition-all {skills[skill] ? 'bg-[#282420] border-amber-500 text-amber-300' : 'bg-[#0f0e0d] border-[#2d2924] text-[#706b63]'}">
+                  <input type="checkbox" bind:checked={skills[skill]} class="hidden" /> {skill}
+                </label>
+              {/each}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ПРАВАЯ КОЛОНКА: ИИ Промпты -->
+      <div class="lg:col-span-4 space-y-4">
+        <div class="p-5 rounded-2xl bg-gradient-to-br from-[#1a1816] to-[#141210] border border-amber-900/40 shadow-[0_0_20px_rgba(245,158,11,0.05)] flex flex-col gap-4 h-full">
+          <h3 class="text-xs font-bold text-amber-400 uppercase tracking-wider border-b border-amber-900/30 pb-2">3. Инструкции ИИ-Агенту (LLM)</h3>
+          
+          <div class="space-y-1.5">
+            <label for="llm-prompt-textarea" class="text-[11px] text-[#a39e95]">Системный промпт (Роль, Характер, Ситуация)</label>
+            <textarea id="llm-prompt-textarea" bind:value={llmSystemPrompt} rows="6" class="w-full px-3.5 py-2.5 rounded-xl bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-emerald-300 italic outline-none leading-relaxed resize-none shadow-inner" placeholder="Ты - недовольный пассажир. Если проводник вежливо просит..."></textarea>
+            <p class="text-[9px] text-[#706b63]">ИИ автоматически получит профиль пассажира и пол проводника. Опишите только суть инцидента.</p>
+          </div>
+
+          <div class="space-y-1.5 flex-1">
+            <label for="expected-rule-textarea" class="text-[11px] text-[#a39e95]">Критерий успеха (Эталонный ответ проводника)</label>
+            <textarea id="expected-rule-textarea" bind:value={expectedRule} rows="4" class="w-full h-[calc(100%-20px)] px-3.5 py-2.5 rounded-xl bg-[#0f0e0d] border border-[#3d3831] focus:border-amber-400 text-xs text-amber-300 outline-none leading-relaxed resize-none shadow-inner" placeholder="Правило: Вежливо извиниться и предложить..."></textarea>
+          </div>
+        </div>
       </div>
     </div>
 
+    <div class="flex justify-end mt-2 pt-4 border-t border-[#2d2924]">
+      <button onclick={handleSaveScenario} disabled={isSaving} class="px-8 py-3.5 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-500 hover:from-amber-500 text-stone-950 font-bold text-sm tracking-wide shadow-lg shadow-amber-500/20 cursor-pointer transition-all flex items-center gap-2 hover:scale-105 active:scale-95 disabled:opacity-50">
+        <span>{isSaving ? '⏳ Добавление...' : '💾 Зарегистрировать событие'}</span>
+      </button>
+    </div>
   {:else}
     <!-- Заглушка базы знаний -->
     <div class="p-5 rounded-2xl bg-[#1a1816] border border-[#2d2924] text-xs text-[#a39e95]">

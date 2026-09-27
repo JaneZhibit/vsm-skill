@@ -199,8 +199,15 @@ class GameMaster:
             val = trig_info.get("value")
             should_fire = False
 
-            if t_type == "time":
-                req_time = start_time_base + (val if val is not None else 0)
+            if t_type in ["time", "test"]:
+                delay = trig_info.get("delay_sec", trig_info.get("value", 10))
+                req_time = start_time_base + (delay if delay is not None else 10)
+                if current_time >= req_time:
+                    should_fire = True
+
+            elif t_type == "orchestrator":
+                delay = trig_info.get("delay_sec", 20)
+                req_time = start_time_base + (delay if delay is not None else 20)
                 if current_time >= req_time:
                     should_fire = True
 
@@ -258,7 +265,8 @@ class GameMaster:
         seat = random.choice(free_seats if free_seats else valid_seats)
         
         # Применяем состояние
-        new_state = scenario.get("passenger_state", "annoyed")
+        allowed = scenario.get("allowed_moods", [])
+        new_state = scenario.get("passenger_state") or (allowed[0] if allowed else "annoyed")
         seat.passenger.state = new_state
         
         # Обновляем спрайт

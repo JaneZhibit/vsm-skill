@@ -148,15 +148,17 @@ class PolzaAIService:
         expected_rule: str,
         passenger_profile: Optional[dict] = None,
         conductor_gender: str = "m",
-        ai_persona: str = ""
+        ai_persona: str = "",
+        allowed_moods: Optional[list] = None
     ) -> Dict[str, Any]:
         cond_gender_str = "Мужчина" if conductor_gender == "m" else "Девушка"
         profile = passenger_profile or {}
         trait = profile.get("trait", "polite")
         trait_ru = {"polite": "вежливый и спокойный", "demanding": "требовательный скандалист", "anxious": "тревожный и нервный"}.get(trait, "нейтральный")
         
-        # Доступные картинки-спрайты
-        available_sprites = ["neutral", "angry", "vaping", "crying_child", "drunk", "sleeping", "happy", "annoyed", "sick"]
+        # Доступные картинки-спрайты (выбранные в Студии или базовые)
+        default_sprites = ["neutral", "angry", "vaping", "crying_child", "drunk", "sleeping", "happy", "annoyed", "sick"]
+        sprites = [m for m in allowed_moods if m] if (allowed_moods and len(allowed_moods) > 0) else default_sprites
 
         system_prompt = f"""
 Ты — пассажир скоростного поезда ВСМ-1. Это реалистичная Role-Play симуляция.
@@ -174,7 +176,7 @@ class PolzaAIService:
 
 ЗАДАЧА:
 1. Ответь проводнику строго в соответствии со своим характером ({trait_ru}). Если он груб или не решил проблему — возмущайся. Если вежлив и прав — соглашайся.
-2. Выбери свое визуальное состояние (спрайт) из списка: {available_sprites}.
+2. Выбери свое визуальное состояние (спрайт) строго из списка: {sprites}.
 3. Оцени проводника.
 
 Выведи ответ строго в JSON по указанной схеме.
@@ -196,7 +198,7 @@ class PolzaAIService:
                             "is_passed": {"type": "boolean", "description": "Проблема решена?"},
                             "loyalty_delta": {"type": "integer", "description": "Очки сервиса (-50..50)"},
                             "safety_delta": {"type": "integer", "description": "Очки безопасности (-50..50)"},
-                            "mood": {"type": "string", "enum": available_sprites, "description": "Новый спрайт пассажира"},
+                            "mood": {"type": "string", "enum": sprites, "description": "Новый спрайт пассажира"},
                             "passenger_reply": {"type": "string", "description": "Твоя прямая речь"},
                             "feedback_title": {"type": "string", "description": "Заголовок разбора для инструктора"},
                             "feedback_text": {"type": "string", "description": "Текст разбора для инструктора"},

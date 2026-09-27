@@ -146,18 +146,21 @@ async def resolve_simulation_incident(payload: ResolveIncidentRequest, user: Dic
 
 
 class LiveScenarioTrigger(BaseModel):
-    type: Literal["time", "speed", "random", "chained"]
+    # orchestrator - решает ИИ, chained - цепная реакция, test - запуск по таймеру для тестов, time, speed, random
+    type: Literal["orchestrator", "chained", "test", "time", "speed", "random"]
     value: Optional[int] = None          # Секунды (time) или км/ч (speed) или шанс % (random)
     parent_id: Optional[str] = None      # ID родительского инцидента (для chained)
-    delay_sec: Optional[int] = None      # Задержка в секундах после начала родительского (chained)
+    delay_sec: Optional[int] = 10        # Задержка в секундах (для test или chained)
 
 class CustomLiveScenarioPayload(BaseModel):
     incident_id: Optional[str] = None
     title: str
     target_archetype: str  # "any", "male_young", "female_young", "female_elderly"
     trigger: LiveScenarioTrigger
-    passenger_state: str   # "vaping", "drunk", "crying", "angry", "sleeping"
-    is_passive: bool       # Если True - нет красного колокольчика, просто меняется стейт
+    allowed_moods: List[str] = ["neutral", "angry", "happy"]  # ИИ выберет только из них
+    ambient_audio: Optional[str] = None # "crying_child.mp3", "vape_hiss.mp3"
+    passenger_state: Optional[str] = None
+    is_passive: bool = False       # Если True - нет красного колокольчика, просто меняется стейт
     llm_system_prompt: str # Что ИИ должен отыгрывать (напр. "Ты куришь вейп...")
     expected_rule: str     # Что должен сказать проводник (для оценки LLM)
     skills: List[str] = [] # ["safety", "service", "discipline", "medicine"]
@@ -165,22 +168,31 @@ class CustomLiveScenarioPayload(BaseModel):
 # Глобальный реестр пользовательских живых сценариев
 LIVE_SCENARIOS_DB = {}
 
+@router.get("/custom-live-scenario")
+async def get_live_scenarios():
+    """Отдает список всех созданных событий для связывания."""
+    return [{"id": k, "title": v.get("title", k)} for k, v in LIVE_SCENARIOS_DB.items()]
+
 @router.post("/custom-live-scenario")
 async def create_live_scenario(payload: CustomLiveScenarioPayload):
     """No-Code редактор живых (эмерджентных) ситуаций."""
     import time
-    inc_id = payload.incident_id or f"live_evt_{int(time.time()*1000)}"
+    inc_id = payload.incident_id or f"evt_{int(time.time()*1000)}"
     data = payload.model_dump()
     data["incident_id"] = inc_id
+    passenger_state = payload.passenger_state or (payload.allowed_moods[0] if payload.allowed_moods else "neutral")
+    data["passenger_state"] = passenger_state
     LIVE_SCENARIOS_DB[inc_id] = data
     SCENARIOS_DB[inc_id] = {
         "incident_id": inc_id,
         "title": payload.title,
         "phase": "passive" if payload.is_passive else "urgent",
-        "passenger_state_during": payload.passenger_state,
+        "passenger_state_during": passenger_state,
         "ai_persona": payload.llm_system_prompt,
         "start_step": "step_1",
         "skills": payload.skills,
+        "allowed_moods": payload.allowed_moods,
+        "ambient_audio": payload.ambient_audio,
         "steps": {
             "step_1": {
                 "prompt": payload.llm_system_prompt,
@@ -228,6 +240,7 @@ async def resolve_voice_incident(
     engine = trip_manager.get_trip(user["id"])
     incident_meta = SCENARIOS_DB.get(payload.incident_id, {})
     ai_persona = incident_meta.get("ai_persona", "")
+    allowed_moods = incident_meta.get("allowed_moods")
 
     # 1. Извлекаем полный профиль текущего пассажира
     active_seat = next((s for s in engine.passenger_manager.seats if s.active_incident), None)
@@ -241,7 +254,8 @@ async def resolve_voice_incident(
         expected_rule=payload.expected_rule or "СТО РЖД 03.011",
         passenger_profile=passenger_profile,
         conductor_gender=user.get("gender", "m"),
-        ai_persona=ai_persona
+        ai_persona=ai_persona,
+        allowed_moods=allowed_moods
     )
     eval_result = engine.game_master.apply_lesson_protection(eval_result)
 
