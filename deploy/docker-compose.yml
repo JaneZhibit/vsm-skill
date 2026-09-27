@@ -17,7 +17,7 @@ services:
       - ../backend/data:/app/data
       - ../backend/tests:/app/tests
       - ../storage:/app/storage
-      - ../frontend/public/assets:/app/frontend/public/assets:ro
+      - ../frontend/public/assets:/frontend/public/assets:ro
     networks:
       - vsm_network
 
