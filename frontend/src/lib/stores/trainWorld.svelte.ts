@@ -54,18 +54,14 @@ export class TrainWorldStore {
 
   // --- МИНИ-ИГРЫ: ПРИЕМКА И СДАЧА ВАГОНА ---
   preTripChecks = $state({ fireExtinguisher: false, climate: false, toilet: false });
-  postTripItems = $state([
-    { id: 'trash1', type: 'trash', top: '75%', left: '35%', icon: '🥤', isFound: false },
-    { id: 'trash2', type: 'trash', top: '82%', left: '60%', icon: '🗞️', isFound: false },
-    { id: 'lost1', type: 'lost', top: '65%', left: '25%', icon: '🌂', isFound: false }, // Забытый зонт на кресле
-  ]);
+  cleaningProgress = $state<number>(0); // Прогресс уборки от 0 до 100%
 
   get isPreTripDone() {
     return this.preTripChecks.fireExtinguisher && this.preTripChecks.climate && this.preTripChecks.toilet;
   }
 
   get isPostTripDone() {
-    return this.postTripItems.every(item => item.isFound);
+    return this.cleaningProgress >= 70; // 70% чистоты достаточно для сдачи
   }
 
   lastProcessedStationIndex = $state<number>(0);
@@ -157,27 +153,28 @@ export class TrainWorldStore {
   public jumpTo(cpIndex: number) { const cp = ROUTE_CHECKPOINTS[cpIndex]; if (cp) { this.interrupt(); this.timeSeconds = timeStringToSeconds(cp.plannedTime); this.speed = cp.baseSpeed; this.syncTripState(); } }
   public togglePause() { this.isPaused = !this.isPaused; this.syncAudioPlayback(true); }
   public async startCruisePhase() {
-    // Делаем запрос на посадку пассажиров
-    try {
-      const res = await apiFetch('/api/v1/simulation/trip/board', { method: 'POST' });
+    // Включаем темный экран с надписью
+    this.isPhaseTransitioning = true;
+    this.timeSkippedText = 'Пассажиры занимают свои места...';
+
+    // В фоне запрашиваем пассажиров
+    apiFetch('/api/v1/simulation/trip/board', { method: 'POST' }).then(async (res) => {
       if (res.ok) {
         const manifest = await res.json();
-        // Заселяем вагон!
         cabinState.seats = manifest.seats.map((s: any) => convertSeatInfoToPassengerSeat(s));
       }
-    } catch (e) {
-      console.error('Ошибка при посадке пассажиров', e);
-    }
+    }).catch(e => console.error('Ошибка при посадке пассажиров', e));
 
-    this.shiftPhase = 'cruise';
-    physicsState.isPaused = false;
-    
-    // Прыгаем ровно на 14:00 (Отправление)
-    physicsState.jumpToTime(DEPARTURE_SECONDS); 
-    this.timeSeconds = DEPARTURE_SECONDS;
-    
-    this.showToast('Посадка завершена', 'Пассажиры на местах. Поезд отправляется!');
-    this.syncTripState();
+    // Даем 2.5 секунды насладиться кинематографичной склейкой
+    setTimeout(() => {
+      this.shiftPhase = 'cruise';
+      physicsState.isPaused = false;
+      physicsState.jumpToTime(DEPARTURE_SECONDS); 
+      this.timeSeconds = DEPARTURE_SECONDS;
+      this.showToast('Посадка завершена', 'Пассажиры на местах. Поезд отправляется!');
+      this.isPhaseTransitioning = false;
+      this.syncTripState();
+    }, 2500);
   }
 
   public skipToNextEvent(): void {
@@ -351,7 +348,7 @@ export class TrainWorldStore {
       trainAudio.stopEventAmbient();
     }
 
-    if (t >= DEPARTURE_SECONDS + 12 && !this.hasPlayedWelcome) {
+    if (t >= DEPARTURE_SECONDS + 1 && !this.hasPlayedWelcome) {
       this.hasPlayedWelcome = true;
       trainAudio.playVoiceAnnouncement('welcome_msc.wav');
     }
@@ -578,11 +575,7 @@ export class TrainWorldStore {
         
         // Сбрасываем мини-игры
         this.preTripChecks = { fireExtinguisher: false, climate: false, toilet: false };
-        this.postTripItems = [
-          { id: 'trash1', type: 'trash', top: '75%', left: '35%', icon: '🥤', isFound: false },
-          { id: 'trash2', type: 'trash', top: '82%', left: '60%', icon: '🗞️', isFound: false },
-          { id: 'lost1', type: 'lost', top: '65%', left: '25%', icon: '🌂', isFound: false },
-        ];
+        this.cleaningProgress = 0;
         
         const firstIncidentSeat = cabinState.seats.find((s) => s.activeIncident != null);
         cabinState.selectedSeatId = firstIncidentSeat?.id || '2A';

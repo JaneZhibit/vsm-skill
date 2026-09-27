@@ -93,6 +93,107 @@
     await trainWorld.startNewTrip();
   }
 
+  // --- МИНИ-ИГРА: УБОРКА ВАГОНА ГУБКОЙ ---
+  let dirtCanvas = $state<HTMLCanvasElement | null>(null);
+  let dirtCtx: CanvasRenderingContext2D | null = null;
+  let isErasing = false;
+  let lastPoint: { x: number; y: number } | null = null;
+  let isDirtCanvasInitialized = false;
+
+  $effect(() => {
+    const isArrival = trainWorld.shiftPhase === 'arrival' || isTripFinished;
+    if (isArrival && dirtCanvas && !isDirtCanvasInitialized) {
+      isDirtCanvasInitialized = true;
+      dirtCtx = dirtCanvas.getContext('2d', { willReadFrequently: true });
+      const img = new Image();
+      img.src = '/assets/cabin_dirty.png';
+      img.onload = () => {
+        if (dirtCanvas && dirtCtx) {
+          dirtCanvas.width = img.naturalWidth || 1671;
+          dirtCanvas.height = img.naturalHeight || 941;
+          dirtCtx.drawImage(img, 0, 0, dirtCanvas.width, dirtCanvas.height);
+        }
+      };
+    } else if (!isArrival) {
+      isDirtCanvasInitialized = false;
+    }
+  });
+
+  function getPointerPos(e: MouseEvent | TouchEvent) {
+    if (!dirtCanvas) return { x: 0, y: 0 };
+    const rect = dirtCanvas.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const scaleX = dirtCanvas.width / rect.width;
+    const scaleY = dirtCanvas.height / rect.height;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY
+    };
+  }
+
+  function startErasing(e: MouseEvent | TouchEvent) {
+    isErasing = true;
+    lastPoint = getPointerPos(e);
+    erase(e);
+  }
+
+  function stopErasing() {
+    if (isErasing) {
+      isErasing = false;
+      lastPoint = null;
+      checkCleaningProgress();
+    }
+  }
+
+  function erase(e: MouseEvent | TouchEvent) {
+    if (!isErasing || !dirtCtx || !dirtCanvas) return;
+    const currentPoint = getPointerPos(e);
+
+    dirtCtx.globalCompositeOperation = 'destination-out';
+    dirtCtx.lineWidth = 120; // Диаметр "губки"
+    dirtCtx.lineCap = 'round';
+    dirtCtx.lineJoin = 'round';
+
+    dirtCtx.beginPath();
+    if (lastPoint) {
+      dirtCtx.moveTo(lastPoint.x, lastPoint.y);
+      dirtCtx.lineTo(currentPoint.x, currentPoint.y);
+      dirtCtx.stroke();
+    } else {
+      dirtCtx.arc(currentPoint.x, currentPoint.y, 60, 0, Math.PI * 2);
+      dirtCtx.fill();
+    }
+    lastPoint = currentPoint;
+  }
+
+  function checkCleaningProgress() {
+    if (!dirtCtx || !dirtCanvas) return;
+    try {
+      const imgData = dirtCtx.getImageData(0, 0, dirtCanvas.width, dirtCanvas.height);
+      const data = imgData.data;
+      let transparentPixels = 0;
+      const totalSampled = data.length / 16; // Выборочная проверка каждого 4-го пикселя для скорости
+
+      for (let i = 3; i < data.length; i += 16) {
+        if (data[i] < 128) {
+          transparentPixels++;
+        }
+      }
+
+      const progress = Math.min(100, (transparentPixels / totalSampled) * 100);
+      const wasDone = trainWorld.isPostTripDone;
+      trainWorld.cleaningProgress = progress;
+
+      if (progress >= 70 && !wasDone) {
+        playSuccessSound();
+        trainWorld.showToast('Вагон сияет!', 'Вы отлично справились с уборкой.');
+      }
+    } catch (err) {
+      console.error('Ошибка подсчета чистоты:', err);
+    }
+  }
+
   let scrollAreaEl = $state<HTMLElement | null>(null);
 
   function centerScroll(smooth = true) {
@@ -293,15 +394,26 @@
           {/if}
         {/if}
 
-        <!-- === МИНИ-ИГРА: СДАЧА ВАГОНА И УБОРКА (ПРИБЫТИЕ) === -->
+        <!-- === МИНИ-ИГРА: СТИРАНИЕ ГРЯЗИ ГУБКОЙ (ПРИБЫТИЕ) === -->
         {#if trainWorld.shiftPhase === 'arrival' || isTripFinished}
-          {#each trainWorld.postTripItems as item}
-            {#if !item.isFound}
-              <button class="interactive-hotspot" style="top: {item.top}; left: {item.left};" onclick={() => { item.isFound = true; playSuccessSound(); trainWorld.showToast('Обход вагона', item.type === 'lost' ? 'Найдена забытая вещь! Передано ЛНП.' : 'Мусор убран.'); }}>
-                <span class="hotspot-ping"></span>{item.icon}
-              </button>
-            {/if}
-          {/each}
+          <canvas
+            bind:this={dirtCanvas}
+            class="absolute inset-0 w-full h-full z-[3] touch-none cursor-crosshair"
+            onmousedown={startErasing}
+            onmousemove={erase}
+            onmouseup={stopErasing}
+            onmouseleave={stopErasing}
+            ontouchstart={startErasing}
+            ontouchmove={erase}
+            ontouchend={stopErasing}
+          ></canvas>
+
+          {#if trainWorld.cleaningProgress < 70}
+            <div class="absolute top-20 left-1/2 -translate-x-1/2 z-[4] bg-stone-900/90 text-amber-400 border border-amber-500/40 px-6 py-2 rounded-full font-bold shadow-2xl backdrop-blur animate-pulse pointer-events-none text-sm flex items-center gap-2">
+              <span>🧼</span>
+              <span>Сотрите грязь и мусор губкой: {Math.round(trainWorld.cleaningProgress)}% / 70%</span>
+            </div>
+          {/if}
         {/if}
 
         <!-- Индикатор активного вызова проводника и пространственная подсветка -->
