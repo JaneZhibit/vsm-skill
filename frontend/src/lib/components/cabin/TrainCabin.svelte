@@ -230,13 +230,17 @@
       </div>
     {:else}
       <div class="scene-container seat-scene" class:ambient-sway={physicsState.speed > 5 && !physicsState.isPaused}>
-        <img src="/assets/seat_bg.png" alt="Салон" class="base-image" />
         {#if selectedSeat?.isOccupied && selectedSeat?.passenger}
           {@const p = selectedSeat.passenger}
           {@const cleanSprite = (cabinState.currentPassengerSprite || p.sprite_url || '').replace('/assets/passengers/', '/assets/')}
-          <img src={cleanSprite} alt={p.full_name} class="passenger-overlay" onerror={(e) => { const target = e.currentTarget as HTMLImageElement; target.src = `/assets/${p.archetype_id}/neutral.png`; }} />
+          <!-- Пассажир теперь сам выступает в роли базовой картинки (base-image) -->
+          <img src={cleanSprite} alt={p.full_name} class="base-image" onerror={(e) => { const target = e.currentTarget as HTMLImageElement; target.src = `/assets/${p.archetype_id}/neutral.png`; }} />
         {:else if !isCabinEmpty && cabinState.passengerMood !== 'empty'}
-          <img src={cabinState.passengerMood === 'calm' ? '/assets/passenger_calm.png' : '/assets/passenger_annoyed.png'} alt="Пассажир" class="passenger-overlay" />
+          <!-- Сюжетный пассажир без билета (если такой есть) -->
+          <img src={cabinState.passengerMood === 'calm' ? '/assets/passenger_calm.png' : '/assets/passenger_annoyed.png'} alt="Пассажир" class="base-image" />
+        {:else}
+          <!-- Если место пустое — показываем просто кресло -->
+          <img src="/assets/seat_bg.png" alt="Свободное место" class="base-image" />
         {/if}
       </div>
     {/if}
